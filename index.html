@@ -4,19 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b2d5b" />
-    <meta name="description" content="동행 Access Lab 3D 장애물 5종 구현 버전" />
-    <title>동행 Access Lab 3D — 장애물 5종</title>
+    <meta name="description" content="동행 Access Lab 3D 이동약자 유형 시스템 적용 버전" />
+    <title>동행 Access Lab 3D — 이동약자 유형 시스템</title>
   </head>
-  <body>
+  <body data-persona="P-00">
     <div id="app">
-      <canvas id="scene" aria-label="학교 앞 이동 장벽 5종 3D 체험 화면"></canvas>
+      <canvas id="scene" aria-label="이동약자 유형별 학교 앞 이동 장벽 3D 체험 화면"></canvas>
 
       <header class="top-bar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">동행</span>
           <div>
             <strong>Access Lab 3D</strong>
-            <span>장애물 5종 구현 · v0.2</span>
+            <span>이동약자 유형 시스템 · v0.3</span>
           </div>
         </div>
         <div class="top-actions">
@@ -27,7 +27,7 @@
 
       <aside class="mission-card" aria-live="polite">
         <div class="eyebrow">현재 미션</div>
-        <h1>장애물 5종을 지나 버스정류장까지 이동하세요.</h1>
+        <h1>선택한 이동 조건으로 장애물 5종을 지나 버스정류장까지 이동하세요.</h1>
         <div class="mission-row">
           <span>현재 구간</span>
           <strong id="zone-label">학교 정문</strong>
@@ -55,55 +55,103 @@
         <ol id="obstacle-status-list" class="obstacle-status-list"></ol>
       </aside>
 
-      <aside class="status-card" aria-live="polite">
-        <div class="status-title">기준 보행 · 장애물 검증</div>
+      <aside class="status-card persona-status-card" aria-live="polite">
+        <div class="status-title" id="persona-name-label">비교 기준 보행자</div>
+        <div class="persona-bottleneck">
+          <span>핵심 병목</span>
+          <strong id="persona-bottleneck-label">비교 기준</strong>
+        </div>
         <div class="status-grid">
-          <div><span>속도</span><strong id="speed-label">0.0 m/s</strong></div>
+          <div><span>현재 속도</span><strong id="speed-label">0.0 m/s</strong></div>
+          <div><span>기본 속도</span><strong id="persona-speed-label">100%</strong></div>
+          <div><span>카메라 높이</span><strong id="camera-height-label">1.65 m</strong></div>
           <div><span>이동 거리</span><strong id="walked-label">0 m</strong></div>
           <div><span>보행 신호</span><strong id="signal-label" class="signal signal-go">진행</strong></div>
           <div><span>남은 시간</span><strong id="signal-time-label">20초</strong></div>
           <div class="wide-status"><span>장애물 충돌</span><strong id="collision-label">0회</strong></div>
         </div>
+        <div id="persona-special-label" class="persona-special">비교 기준 프로필</div>
       </aside>
 
       <div class="crosshair" aria-hidden="true"></div>
 
       <div id="context-message" class="context-message" aria-live="assertive">
         <span class="context-step">안내</span>
-        <span id="context-text">체험 시작을 누른 뒤 WASD로 이동하세요.</span>
+        <span id="context-text">유형을 선택한 뒤 WASD로 이동하세요.</span>
       </div>
 
       <div class="control-hint" aria-hidden="true">
         <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</span>
         <span>마우스 시점</span>
+        <span id="cane-hint" hidden><kbd>F</kbd> 지팡이 탐지</span>
         <span><kbd>ESC</kbd> 일시정지</span>
         <span><kbd>R</kbd> 처음 위치</span>
       </div>
 
       <section id="intro-modal" class="modal-layer is-open" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <div class="modal intro-panel">
-          <div class="modal-kicker">동행 Access Lab 3D · v0.2-obstacles</div>
-          <h2 id="intro-title">이동 장벽 5종 체험</h2>
-          <p class="lead">학교 정문에서 버스정류장까지 이동하며 서로 다른 장애물의 물리 반응을 확인하세요.</p>
+          <div class="modal-kicker">동행 Access Lab 3D · v0.3-personas</div>
+          <h2 id="intro-title">같은 길, 다른 이동 경험</h2>
+          <p class="lead">같은 장애물도 이동 조건이 달라지면 상황인지·판단·동작수행의 결과가 달라집니다.</p>
           <div class="notice-box">
-            <strong>이번 버전의 구현 범위</strong>
-            <p>높은 단차, 가파른 경사로, 불법 주차 차량과 좁은 통로, 파손 점자블록, 볼라드·입간판을 구현했습니다. 페르소나별 차이는 다음 단계에서 적용합니다.</p>
+            <strong>교육용 체험 안내</strong>
+            <p>이 시뮬레이터는 실제 장애인의 경험 전체를 재현하지 않습니다. 특정 이동 조건과 환경 장벽의 상호작용을 비교하기 위한 교육용 모델입니다.</p>
           </div>
-          <div class="obstacle-summary-grid" aria-label="장애물 5종">
-            <div><b>O-01</b><span>높은 단차</span></div>
-            <div><b>O-02</b><span>가파른 경사</span></div>
-            <div><b>O-03</b><span>불법 주차</span></div>
-            <div><b>O-04</b><span>파손 점자블록</span></div>
-            <div><b>O-05</b><span>볼라드·입간판</span></div>
+          <div class="obstacle-summary-grid" aria-label="구현 기능">
+            <div><b>4개</b><span>체험 프로필</span></div>
+            <div><b>5개</b><span>장애물</span></div>
+            <div><b>15개</b><span>핵심 조합</span></div>
+            <div><b>3단계</b><span>인지·판단·수행</span></div>
+            <div><b>1개</b><span>비교 기준</span></div>
           </div>
           <div class="key-grid">
             <div><span class="key-icon">WASD</span><strong>앞·뒤·좌·우 이동</strong></div>
             <div><span class="key-icon">↔</span><strong>마우스로 시점 회전</strong></div>
-            <div><span class="key-icon">ESC</span><strong>일시정지·커서 해제</strong></div>
+            <div><span class="key-icon">F</span><strong>시각장애 모드 지팡이 탐지</strong></div>
             <div><span class="key-icon">R</span><strong>출발 위치로 재설정</strong></div>
           </div>
-          <button id="start-button" class="primary-button" type="button">장애물 체험 시작</button>
-          <p class="fine-print">이 버전은 장애물의 위치·충돌·감속·우회 동작을 검증하기 위한 기준 보행 모드입니다.</p>
+          <button id="start-button" class="primary-button" type="button">이동약자 유형 선택</button>
+          <p class="fine-print">비교 기준 모드와 3개 이동약자 유형을 같은 경로에서 반복 체험할 수 있습니다.</p>
+        </div>
+      </section>
+
+      <section id="persona-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="persona-title">
+        <div class="modal persona-panel">
+          <div class="modal-kicker">체험 유형 선택</div>
+          <h2 id="persona-title">어떤 이동 조건으로 체험할까요?</h2>
+          <p class="persona-intro">카메라 높이, 이동 속도, 사용자 폭, 반응 지연과 장애물 통과 규칙이 유형에 따라 달라집니다.</p>
+          <div class="persona-grid" role="group" aria-label="이동약자 유형">
+            <button class="persona-option is-selected" type="button" data-persona-id="P-00" aria-pressed="true">
+              <span class="persona-code">P-00</span>
+              <strong>비교 기준 보행자</strong>
+              <small>같은 환경의 기준 결과</small>
+              <ul><li>높이 1.65m</li><li>속도 100%</li><li>핵심 병목: 비교 기준</li></ul>
+            </button>
+            <button class="persona-option" type="button" data-persona-id="P-01" aria-pressed="false">
+              <span class="persona-code">P-01</span>
+              <strong>수동 휠체어 사용자</strong>
+              <small>단차·폭·경사·회전 반경</small>
+              <ul><li>높이 0.95m</li><li>속도 70%</li><li>핵심 병목: 동작수행</li></ul>
+            </button>
+            <button class="persona-option" type="button" data-persona-id="P-02" aria-pressed="false">
+              <span class="persona-code">P-02</span>
+              <strong>고령 보행자·지팡이</strong>
+              <small>정보 확인·판단·수행 지연</small>
+              <ul><li>높이 1.45m</li><li>속도 55%</li><li>반응 지연 0.3초</li></ul>
+            </button>
+            <button class="persona-option" type="button" data-persona-id="P-03" aria-pressed="false">
+              <span class="persona-code">P-03</span>
+              <strong>시각장애인·흰지팡이</strong>
+              <small>정보 연속성과 방향 판단</small>
+              <ul><li>높이 1.55m</li><li>속도 60%</li><li>F 키 탐지 1.2m</li></ul>
+            </button>
+          </div>
+          <div id="persona-selection-summary" class="persona-selection-summary" aria-live="polite"></div>
+          <div class="persona-actions">
+            <button id="persona-back-button" class="secondary-button" type="button">뒤로</button>
+            <button id="persona-start-button" class="primary-button" type="button">이 유형으로 체험 시작</button>
+          </div>
+          <p class="fine-print">유형을 바꾸면 미션과 기록이 처음부터 다시 시작됩니다.</p>
         </div>
       </section>
 
@@ -111,34 +159,42 @@
         <div class="modal compact-panel">
           <div class="modal-kicker">일시정지</div>
           <h2 id="pause-title">체험이 잠시 멈췄습니다.</h2>
-          <p>계속하거나 출발 위치로 돌아갈 수 있습니다.</p>
+          <p>계속하거나 유형을 바꾸어 같은 환경을 다시 비교할 수 있습니다.</p>
           <div class="button-stack">
             <button id="resume-button" class="primary-button" type="button">계속하기</button>
-            <button id="reset-button" class="secondary-button" type="button">출발 위치로 돌아가기</button>
+            <button id="change-persona-button" class="secondary-button" type="button">이동약자 유형 바꾸기</button>
+            <button id="reset-button" class="secondary-button" type="button">현재 유형으로 처음부터</button>
             <button id="pause-settings-button" class="secondary-button" type="button">장애물·화면 설정</button>
           </div>
         </div>
       </section>
 
       <section id="complete-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="complete-title">
-        <div class="modal result-panel">
+        <div class="modal result-panel persona-result-panel">
           <div class="result-badge" aria-hidden="true">✓</div>
           <div class="modal-kicker">미션 완료</div>
           <h2 id="complete-title">버스정류장에 도착했습니다.</h2>
-          <div class="result-grid result-grid-six">
+          <div class="result-profile">
+            <span>체험 유형</span>
+            <strong id="result-persona">비교 기준 보행자</strong>
+            <em>핵심 병목: <b id="result-bottleneck">비교 기준</b></em>
+          </div>
+          <div class="result-grid result-grid-eight">
             <div><span>소요 시간</span><strong id="result-time">0초</strong></div>
             <div><span>이동 거리</span><strong id="result-distance">0m</strong></div>
             <div><span>통과 장애물</span><strong id="result-obstacles">0 / 5</strong></div>
             <div><span>충돌 횟수</span><strong id="result-collisions">0회</strong></div>
             <div><span>이동 차단</span><strong id="result-blocked">0회</strong></div>
             <div><span>거친 노면</span><strong id="result-rough">0초</strong></div>
+            <div><span>지팡이 탐지</span><strong id="result-cane-scans">해당 없음</strong></div>
+            <div><span>방향 편차</span><strong id="result-direction">해당 없음</strong></div>
           </div>
-          <div class="reflection-box">
-            <strong>다음 단계에서 확인할 질문</strong>
-            <p>같은 장애물도 휠체어 사용자, 고령 보행자, 시각장애인에게 서로 다른 결과를 만들려면 어떤 규칙이 추가되어야 할까요?</p>
+          <div class="reflection-box persona-result-note">
+            <strong>이 유형에서 관찰할 점</strong>
+            <p id="result-persona-note"></p>
           </div>
           <div class="button-stack">
-            <button id="replay-button" class="primary-button" type="button">다시 체험하기</button>
+            <button id="replay-button" class="primary-button" type="button">같은 유형으로 다시 체험</button>
             <button id="return-button" class="secondary-button" type="button">시작 화면으로</button>
           </div>
         </div>
@@ -153,7 +209,7 @@
             <input id="low-spec-toggle" type="checkbox" />
           </label>
           <label class="setting-row">
-            <span><strong>상황 안내</strong><small>상황인지·판단·수행 안내 문구를 표시합니다.</small></span>
+            <span><strong>상황 안내</strong><small>유형별 상황인지·판단·수행 안내 문구를 표시합니다.</small></span>
             <input id="guide-toggle" type="checkbox" checked />
           </label>
           <label class="setting-row">
@@ -177,15 +233,14 @@
       <section id="help-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <div class="modal compact-panel help-panel">
           <div class="modal-kicker">도움말</div>
-          <h2 id="help-title">장애물 통과 방법</h2>
+          <h2 id="help-title">유형별 조작과 관찰 방법</h2>
           <ul class="help-list">
-            <li><b>O-01:</b> 정면 턱은 막혀 있습니다. 오른쪽 경사 통로로 이동합니다.</li>
-            <li><b>O-02:</b> 경사 구간에서는 속도가 자동으로 감소합니다.</li>
-            <li><b>O-03:</b> 차량 오른쪽의 좁은 통로를 천천히 통과합니다.</li>
-            <li><b>O-04:</b> 거친 구간에서는 속도와 화면 흔들림이 달라집니다.</li>
-            <li><b>O-05:</b> 볼라드 사이에 시점을 맞추고 입간판을 피합니다.</li>
+            <li><b>비교 기준:</b> 같은 장애물의 기준 소요 시간과 통과 결과를 확인합니다.</li>
+            <li><b>휠체어:</b> 단차, 좁은 통로, 볼라드 간격에서 폭과 회전 반경을 확인합니다.</li>
+            <li><b>고령 보행:</b> 입력 시작 지연, 느린 속도, 경사 구간의 누적 시간을 확인합니다.</li>
+            <li><b>시각장애:</b> <kbd>F</kbd> 키로 1.2m 범위의 지팡이 탐지를 사용하고 점자블록 단절 구간의 방향 변화를 확인합니다.</li>
           </ul>
-          <p class="help-note">충돌하여 움직이지 않을 때는 <kbd>S</kbd>로 뒤로 이동한 뒤 방향을 바꾸세요.</p>
+          <p class="help-note">막혔을 때는 <kbd>S</kbd>로 뒤로 이동한 뒤 방향을 바꾸세요. 유형을 비교하려면 ESC → 이동약자 유형 바꾸기를 선택합니다.</p>
           <button id="help-close-button" class="primary-button" type="button">확인</button>
         </div>
       </section>

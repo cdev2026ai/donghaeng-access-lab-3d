@@ -2,10 +2,13 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import './style.css';
 
-type ModalId = 'intro-modal' | 'pause-modal' | 'complete-modal' | 'settings-modal' | 'help-modal';
+type ModalId = 'intro-modal' | 'persona-modal' | 'pause-modal' | 'complete-modal' | 'settings-modal' | 'help-modal';
 type SignalPhase = 'go' | 'wait' | 'stop';
 type ObstacleId = 'O-01' | 'O-02' | 'O-03' | 'O-04' | 'O-05';
 type ObstacleState = 'ready' | 'approached' | 'passed' | 'disabled';
+type PersonaId = 'P-00' | 'P-01' | 'P-02' | 'P-03';
+type PersonaMessagePhase = 'approach' | 'decision' | 'action' | 'result';
+type CurbMode = 'pass' | 'slow' | 'blocked';
 
 type BoxCollider = {
   box: THREE.Box3;
@@ -41,9 +44,208 @@ type RectZone = {
   speedMultiplier: number;
 };
 
-const PLAYER_EYE_HEIGHT = 1.65;
-const PLAYER_RADIUS = 0.28;
+type PersonaDefinition = {
+  id: PersonaId;
+  name: string;
+  shortName: string;
+  description: string;
+  bottleneck: string;
+  cameraHeight: number;
+  radius: number;
+  speedMultiplier: number;
+  strafeMultiplier: number;
+  turnMultiplier: number;
+  reactionDelay: number;
+  maxStepHeight: number;
+  maxSlope: number;
+  curbMode: CurbMode;
+  caneRange: number;
+  zoneMultipliers: Record<ObstacleId, number>;
+  resultNote: string;
+};
+
+type PersonaObstacleMessage = Record<PersonaMessagePhase, string>;
+
 const BASE_MAX_SPEED = 3.15;
+const POINTER_SPEED = 0.72;
+
+const PERSONAS: Record<PersonaId, PersonaDefinition> = {
+  'P-00': {
+    id: 'P-00',
+    name: '비교 기준 보행자',
+    shortName: '비교 기준',
+    description: '같은 환경에서 이동 장벽의 차이를 비교하기 위한 기준 모드',
+    bottleneck: '비교 기준',
+    cameraHeight: 1.65,
+    radius: 0.25,
+    speedMultiplier: 1,
+    strafeMultiplier: 1,
+    turnMultiplier: 1,
+    reactionDelay: 0,
+    maxStepHeight: 0.15,
+    maxSlope: 12,
+    curbMode: 'pass',
+    caneRange: 0,
+    zoneMultipliers: { 'O-01': 1, 'O-02': 0.85, 'O-03': 0.85, 'O-04': 0.9, 'O-05': 0.85 },
+    resultNote: '비교 기준 모드에서는 대부분의 구간을 통과할 수 있습니다. 다른 유형에서 같은 환경의 결과가 어떻게 달라지는지 비교해 보세요.',
+  },
+  'P-01': {
+    id: 'P-01',
+    name: '수동 휠체어 사용자',
+    shortName: '휠체어',
+    description: '단차·폭·경사·회전 반경이 실제 통과 가능성을 바꾸는 이동 조건',
+    bottleneck: '동작수행',
+    cameraHeight: 0.95,
+    radius: 0.45,
+    speedMultiplier: 0.7,
+    strafeMultiplier: 0.6,
+    turnMultiplier: 0.72,
+    reactionDelay: 0,
+    maxStepHeight: 0.03,
+    maxSlope: 8,
+    curbMode: 'blocked',
+    caneRange: 0,
+    zoneMultipliers: { 'O-01': 0.7, 'O-02': 0.55, 'O-03': 0.4, 'O-04': 0.8, 'O-05': 0.4 },
+    resultNote: '휠체어 모드에서는 단차와 통로 폭, 회전 반경이 이동을 차단할 수 있습니다. 사용자의 몸보다 환경 치수가 결과를 어떻게 바꾸었는지 확인하세요.',
+  },
+  'P-02': {
+    id: 'P-02',
+    name: '고령 보행자·지팡이 사용자',
+    shortName: '고령 보행',
+    description: '정보 확인과 판단, 이동 수행에 시간이 더 걸리고 피로가 누적되는 이동 조건',
+    bottleneck: '상황인지·판단·수행 전반 지연',
+    cameraHeight: 1.45,
+    radius: 0.275,
+    speedMultiplier: 0.55,
+    strafeMultiplier: 0.7,
+    turnMultiplier: 0.62,
+    reactionDelay: 0.3,
+    maxStepHeight: 0.08,
+    maxSlope: 10,
+    curbMode: 'slow',
+    caneRange: 0,
+    zoneMultipliers: { 'O-01': 0.6, 'O-02': 0.45, 'O-03': 0.5, 'O-04': 0.65, 'O-05': 0.6 },
+    resultNote: '고령 보행 모드에서는 작은 감속과 판단 지연이 전체 이동 시간과 재시도 횟수에 누적됩니다. 안전한 휴식과 충분한 신호 시간이 왜 필요한지 살펴보세요.',
+  },
+  'P-03': {
+    id: 'P-03',
+    name: '시각장애인·흰지팡이 사용자',
+    shortName: '시각장애',
+    description: '점자블록·지팡이·방향 정보의 연속성이 이동 판단을 좌우하는 조건',
+    bottleneck: '상황인지',
+    cameraHeight: 1.55,
+    radius: 0.275,
+    speedMultiplier: 0.6,
+    strafeMultiplier: 0.75,
+    turnMultiplier: 0.75,
+    reactionDelay: 0.08,
+    maxStepHeight: 0.04,
+    maxSlope: 10,
+    curbMode: 'blocked',
+    caneRange: 1.2,
+    zoneMultipliers: { 'O-01': 0.5, 'O-02': 0.75, 'O-03': 0.45, 'O-04': 0.5, 'O-05': 0.45 },
+    resultNote: '시각장애 모드에서는 정보가 끊기는 순간 방향 판단과 이동 수행도 함께 어려워집니다. F 키 지팡이 탐지와 점자블록의 연속성이 결과에 어떤 차이를 만들었는지 확인하세요.',
+  },
+};
+
+const PERSONA_MESSAGES: Partial<Record<PersonaId, Partial<Record<ObstacleId, PersonaObstacleMessage>>>> = {
+  'P-01': {
+    'O-01': {
+      approach: '12cm 단차가 앞에 있습니다. 현재 휠체어의 통과 가능 단차는 3cm입니다.',
+      decision: '정면 통과가 불가능합니다. 오른쪽 경사 통로를 찾아야 합니다.',
+      action: '앞바퀴가 턱에 걸려 이동이 멈췄습니다. 뒤로 이동한 뒤 오른쪽으로 우회하세요.',
+      result: '경사 통로를 이용해 단차 구간을 통과했습니다.',
+    },
+    'O-02': {
+      approach: '가파른 경사로입니다. 경사 구간에서 이동 속도가 크게 감소합니다.',
+      decision: '현재 경사도는 권장 한계보다 높습니다. 천천히 진입하거나 평지로 우회하세요.',
+      action: '경사면에서 속도가 감소했습니다. 입력을 멈추면 약하게 뒤로 밀릴 수 있습니다.',
+      result: '경사 구간을 통과했습니다. 이동 시간이 평지보다 길어졌습니다.',
+    },
+    'O-03': {
+      approach: '차량 옆 남은 통로가 휠체어 폭보다 좁습니다.',
+      decision: '보도 통과는 어렵습니다. 되돌아가거나 차도 쪽 위험 구역을 확인해야 합니다.',
+      action: '통로 폭이 부족해 이동이 차단되었습니다.',
+      result: '좁은 통로 구간을 우회했습니다.',
+    },
+    'O-04': {
+      approach: '파손된 점자블록 표면이 휠체어 조향과 승차감에 영향을 줍니다.',
+      decision: '거친 노면을 천천히 통과하거나 평탄한 쪽으로 이동하세요.',
+      action: '노면 진동과 조향 저하가 발생했습니다.',
+      result: '거친 노면 구간을 감속하여 통과했습니다.',
+    },
+    'O-05': {
+      approach: '볼라드 간격이 휠체어 폭보다 좁고 입간판이 진입 각도를 막고 있습니다.',
+      decision: '정면 진입은 어렵습니다. 후진 후 각도를 바꾸거나 우회하세요.',
+      action: '폭 또는 회전 반경이 부족해 시설물에 막혔습니다.',
+      result: '재진입 또는 우회로 시설물 구간을 통과했습니다.',
+    },
+  },
+  'P-02': {
+    'O-01': {
+      approach: '높이 변화가 있는 턱입니다. 가까이에서 높이를 다시 확인하세요.',
+      decision: '균형과 통증을 고려해 천천히 넘거나 경사 통로로 우회하세요.',
+      action: '속도가 감소하고 균형 부담이 커졌습니다.',
+      result: '감속하거나 경사 통로를 이용해 단차 구간을 통과했습니다.',
+    },
+    'O-02': {
+      approach: '길고 가파른 경사로입니다. 이동 중 피로가 빠르게 누적될 수 있습니다.',
+      decision: '계속 이동할지 잠시 쉬거나 우회할지 판단하세요.',
+      action: '보행 속도와 방향 전환이 느려졌습니다.',
+      result: '경사 구간을 천천히 통과했습니다.',
+    },
+    'O-03': {
+      approach: '차량과 차도 사이의 좁은 통로입니다.',
+      decision: '좁은 보도와 차도 우회 중 더 안전한 경로를 선택하세요.',
+      action: '몸과 지팡이를 비켜 천천히 통과하고 있습니다.',
+      result: '차량 근접 구간을 감속하여 통과했습니다.',
+    },
+    'O-04': {
+      approach: '바닥이 파손되고 높이가 고르지 않은 구간입니다.',
+      decision: '넘어짐 위험을 줄이기 위해 감속하거나 우회하세요.',
+      action: '균형 부담으로 이동 속도가 감소했습니다.',
+      result: '거친 바닥 구간을 천천히 통과했습니다.',
+    },
+    'O-05': {
+      approach: '볼라드와 입간판 사이의 폭을 확인하는 데 시간이 필요합니다.',
+      decision: '몸과 지팡이가 함께 지나갈 수 있는 간격인지 확인하세요.',
+      action: '시설물 근접으로 속도가 감소했습니다.',
+      result: '시설물 사이를 조심스럽게 통과했습니다.',
+    },
+  },
+  'P-03': {
+    'O-01': {
+      approach: '전방 바닥 높이 정보가 충분하지 않습니다. F 키로 지팡이 탐지를 사용하세요.',
+      decision: '턱을 감지한 뒤 경사 통로의 방향 정보를 확인해야 합니다.',
+      action: '턱을 늦게 감지해 이동이 멈췄습니다. 좌우를 탐색하세요.',
+      result: '경사 통로 방향을 찾아 단차 구간을 통과했습니다.',
+    },
+    'O-02': {
+      approach: '바닥 기울기가 변합니다. 경사 시작과 종료 방향을 확인하세요.',
+      decision: '방향 정보가 충분한지 확인한 뒤 진입하세요.',
+      action: '경사면에서 속도가 감소하고 방향 유지가 어려워질 수 있습니다.',
+      result: '경사 종료 지점을 확인하며 구간을 통과했습니다.',
+    },
+    'O-03': {
+      approach: '보도를 막은 차량 때문에 보도와 차도 경계 정보가 불명확합니다.',
+      decision: '현재 위치가 안전한 보도인지 확인할 추가 정보가 필요합니다.',
+      action: '차도 방향으로 경로가 이탈할 위험이 있습니다. F 키로 주변을 확인하세요.',
+      result: '차도 경계를 확인하고 차량 구간을 벗어났습니다.',
+    },
+    'O-04': {
+      approach: '점자 유도 정보가 끊기고 잘못된 방향으로 이어집니다.',
+      decision: '계속 이동할지 멈춰 재탐색할지 판단하세요.',
+      action: '방향 보정이 해제되어 경로 편차가 발생합니다.',
+      result: '정상 점자블록을 다시 찾아 방향 정보를 복구했습니다.',
+    },
+    'O-05': {
+      approach: '지팡이 탐지 높이 밖의 돌출물이 있을 수 있습니다.',
+      decision: '시설물 형태와 우회 방향을 확인하세요.',
+      action: '입간판을 늦게 감지해 정지하거나 경로를 다시 탐색합니다.',
+      result: '시설물 위치를 확인하고 통과했습니다.',
+    },
+  },
+};
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 if (!canvas) throw new Error('3D canvas not found.');
@@ -53,7 +255,7 @@ scene.background = new THREE.Color(0x9ed7ff);
 scene.fog = new THREE.Fog(0xb9dff5, 48, 105);
 
 const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 180);
-camera.position.set(0, PLAYER_EYE_HEIGHT, 22);
+camera.position.set(0, PERSONAS['P-00'].cameraHeight, 22);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.7));
@@ -65,15 +267,15 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const controls = new PointerLockControls(camera, renderer.domElement);
-controls.pointerSpeed = 0.72;
+controls.pointerSpeed = POINTER_SPEED;
 scene.add(camera);
 
 const clock = new THREE.Clock();
 const keys = new Set<string>();
 const velocity = new THREE.Vector3();
 const previousPosition = new THREE.Vector3();
-const startPosition = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 22);
-const destination = new THREE.Vector3(4.5, PLAYER_EYE_HEIGHT, -22.5);
+const startPosition = new THREE.Vector3(0, PERSONAS['P-00'].cameraHeight, 22);
+const destination = new THREE.Vector3(4.5, PERSONAS['P-00'].cameraHeight, -22.5);
 const startToDestination = startPosition.distanceTo(destination);
 const colliders: BoxCollider[] = [];
 const obstacles = new Map<ObstacleId, ObstacleDefinition>();
@@ -96,6 +298,12 @@ let currentObstacleId: ObstacleId | null = null;
 let contextOverrideUntil = 0;
 let lastCollisionAt = 0;
 let lastCollisionLabel = '';
+let currentPersona: PersonaDefinition = PERSONAS['P-00'];
+let selectedPersonaId: PersonaId = 'P-00';
+let caneScanCount = 0;
+let directionDeviation = 0;
+let inputReadyAt = 0;
+let hadMovementInput = false;
 
 const query = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
@@ -125,6 +333,87 @@ const obstacleCountLabel = query<HTMLElement>('#obstacle-count-label');
 const currentObstacleLabel = query<HTMLElement>('#current-obstacle-label');
 const obstacleStatusList = query<HTMLElement>('#obstacle-status-list');
 const collisionLabel = query<HTMLElement>('#collision-label');
+const personaNameLabel = query<HTMLElement>('#persona-name-label');
+const personaBottleneckLabel = query<HTMLElement>('#persona-bottleneck-label');
+const cameraHeightLabel = query<HTMLElement>('#camera-height-label');
+const personaSpeedLabel = query<HTMLElement>('#persona-speed-label');
+const personaSpecialLabel = query<HTMLElement>('#persona-special-label');
+const personaSelectionSummary = query<HTMLElement>('#persona-selection-summary');
+const caneHint = query<HTMLElement>('#cane-hint');
+const resultPersona = query<HTMLElement>('#result-persona');
+const resultBottleneck = query<HTMLElement>('#result-bottleneck');
+const resultCaneScans = query<HTMLElement>('#result-cane-scans');
+const resultDirection = query<HTMLElement>('#result-direction');
+const resultPersonaNote = query<HTMLElement>('#result-persona-note');
+
+
+function getPersonaMessage(obstacle: ObstacleDefinition, phase: PersonaMessagePhase): string {
+  return PERSONA_MESSAGES[currentPersona.id]?.[obstacle.id]?.[phase] ?? obstacle[phase];
+}
+
+function renderPersonaSelection(): void {
+  document.querySelectorAll<HTMLElement>('[data-persona-id]').forEach((card) => {
+    const id = card.dataset.personaId as PersonaId;
+    card.classList.toggle('is-selected', id === selectedPersonaId);
+    card.setAttribute('aria-pressed', String(id === selectedPersonaId));
+  });
+  const persona = PERSONAS[selectedPersonaId];
+  personaSelectionSummary.innerHTML = `<strong>${persona.name}</strong><span>핵심 병목: ${persona.bottleneck} · 카메라 ${persona.cameraHeight.toFixed(2)}m · 기본 속도 ${Math.round(persona.speedMultiplier * 100)}%</span>`;
+}
+
+function applyPersona(id: PersonaId): void {
+  currentPersona = PERSONAS[id];
+  selectedPersonaId = id;
+  startPosition.y = currentPersona.cameraHeight;
+  controls.pointerSpeed = POINTER_SPEED * currentPersona.turnMultiplier;
+  document.body.dataset.persona = id;
+  personaNameLabel.textContent = currentPersona.name;
+  personaBottleneckLabel.textContent = currentPersona.bottleneck;
+  cameraHeightLabel.textContent = `${currentPersona.cameraHeight.toFixed(2)} m`;
+  personaSpeedLabel.textContent = `${Math.round(currentPersona.speedMultiplier * 100)}%`;
+  personaSpecialLabel.textContent = currentPersona.id === 'P-01'
+    ? `사용자 폭 ${(currentPersona.radius * 2).toFixed(2)}m · 최대 단차 ${(currentPersona.maxStepHeight * 100).toFixed(0)}cm`
+    : currentPersona.id === 'P-02'
+      ? `반응 지연 ${currentPersona.reactionDelay.toFixed(1)}초 · 경사 권장 ${currentPersona.maxSlope}° 이하`
+      : currentPersona.id === 'P-03'
+        ? `지팡이 탐지 ${currentPersona.caneRange.toFixed(1)}m · F 키 사용`
+        : '비교 기준 프로필';
+  caneHint.hidden = currentPersona.id !== 'P-03';
+  renderPersonaSelection();
+}
+
+function openPersonaSelection(): void {
+  renderPersonaSelection();
+  openModal('persona-modal');
+  controls.unlock();
+}
+
+function performCaneScan(): void {
+  if (currentPersona.id !== 'P-03' || !hasStarted || missionComplete) return;
+  const origin = new THREE.Vector3(camera.position.x, 0.65, camera.position.z);
+  const closest = new THREE.Vector3();
+  let nearest: BoxCollider | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  colliders.forEach((collider) => {
+    if (!collider.enabled || !collider.obstacleId) return;
+    collider.box.clampPoint(origin, closest);
+    const distance = closest.distanceTo(origin);
+    if (distance < nearestDistance) {
+      nearest = collider;
+      nearestDistance = distance;
+    }
+  });
+
+  caneScanCount += 1;
+  if (nearest && nearestDistance <= currentPersona.caneRange) {
+    const detected = nearest as BoxCollider;
+    const obstacle = detected.obstacleId ? obstacles.get(detected.obstacleId) : undefined;
+    setContextOverride('지팡이 탐지', `${nearestDistance.toFixed(1)}m 앞에 ${obstacle?.shortName ?? detected.label}이 있습니다.`, 2300);
+  } else {
+    setContextOverride('지팡이 탐지', `${currentPersona.caneRange.toFixed(1)}m 범위 안에서 직접 닿는 장애물을 감지하지 못했습니다.`, 1800);
+  }
+}
 
 function getModal(id: ModalId): HTMLElement {
   return query<HTMLElement>(`#${id}`);
@@ -421,6 +710,8 @@ function createCurbObstacle(): void {
   });
   addTextSprite('O-01  높은 단차 · 우측 경사로', new THREE.Vector3(4.2, 2.7, 17.1), '#9c4f3b', 0.72);
 
+  speedZones.push({ obstacleId: id, minX: -20, maxX: 20, minZ: 16.2, maxZ: 17.8, speedMultiplier: 1 });
+
   registerObstacle({
     id,
     name: '높은 단차·보도 턱',
@@ -637,14 +928,21 @@ function addBoundaryColliders(): void {
 
 function playerBoxAt(position: THREE.Vector3): THREE.Box3 {
   return new THREE.Box3(
-    new THREE.Vector3(position.x - PLAYER_RADIUS, 0.05, position.z - PLAYER_RADIUS),
-    new THREE.Vector3(position.x + PLAYER_RADIUS, 1.9, position.z + PLAYER_RADIUS),
+    new THREE.Vector3(position.x - currentPersona.radius, 0.05, position.z - currentPersona.radius),
+    new THREE.Vector3(position.x + currentPersona.radius, Math.max(1.8, currentPersona.cameraHeight + 0.35), position.z + currentPersona.radius),
   );
+}
+
+function shouldIgnoreCollider(collider: BoxCollider): boolean {
+  if (collider.obstacleId === 'O-01' && collider.label.startsWith('O-01-curb')) {
+    return currentPersona.curbMode !== 'blocked';
+  }
+  return false;
 }
 
 function findBlockingCollider(position: THREE.Vector3): BoxCollider | null {
   const playerBox = playerBoxAt(position);
-  return colliders.find((collider) => collider.enabled && playerBox.intersectsBox(collider.box)) ?? null;
+  return colliders.find((collider) => collider.enabled && !shouldIgnoreCollider(collider) && playerBox.intersectsBox(collider.box)) ?? null;
 }
 
 function isObstacleEnabled(id: ObstacleId): boolean {
@@ -665,24 +963,28 @@ function isInRect(position: THREE.Vector3, zone: RectZone): boolean {
   return position.x >= zone.minX && position.x <= zone.maxX && position.z >= zone.minZ && position.z <= zone.maxZ;
 }
 
-function getEnvironmentEffects(position: THREE.Vector3): { speedMultiplier: number; rough: boolean } {
+function getEnvironmentEffects(position: THREE.Vector3): { speedMultiplier: number; rough: boolean; activeObstacleId: ObstacleId | null } {
   let multiplier = 1;
   let rough = false;
+  let activeObstacleId: ObstacleId | null = null;
   speedZones.forEach((zone) => {
     if (!isObstacleEnabled(zone.obstacleId) || !isInRect(position, zone)) return;
-    multiplier = Math.min(multiplier, zone.speedMultiplier);
+    const personaMultiplier = currentPersona.zoneMultipliers[zone.obstacleId] ?? zone.speedMultiplier;
+    multiplier = Math.min(multiplier, personaMultiplier);
+    activeObstacleId = zone.obstacleId;
     if (zone.obstacleId === 'O-04') rough = true;
   });
-  return { speedMultiplier: multiplier, rough };
+  return { speedMultiplier: multiplier, rough, activeObstacleId };
 }
 
 function setPlayerHeight(time: number): void {
   const rampHeight = getRampHeight(camera.position.x, camera.position.z);
   const { rough } = getEnvironmentEffects(camera.position);
+  const personaShakeScale = currentPersona.id === 'P-02' ? 0.75 : currentPersona.id === 'P-03' ? 0.45 : currentPersona.id === 'P-01' ? 0.85 : 0.6;
   const shake = rough && motionEnabled && !document.body.classList.contains('low-spec')
-    ? Math.sin(time * 42) * 0.018 + Math.sin(time * 23) * 0.009
+    ? (Math.sin(time * 42) * 0.018 + Math.sin(time * 23) * 0.009) * personaShakeScale
     : 0;
-  camera.position.y = PLAYER_EYE_HEIGHT + rampHeight + shake;
+  camera.position.y = currentPersona.cameraHeight + rampHeight + shake;
 }
 
 function registerCollision(collider: BoxCollider): void {
@@ -697,7 +999,7 @@ function registerCollision(collider: BoxCollider): void {
   collisionLabel.textContent = `${collisionCount}회`;
   const obstacle = obstacles.get(collider.obstacleId);
   if (obstacle) {
-    setContextOverride('동작수행', obstacle.action, 2100);
+    setContextOverride('동작수행', getPersonaMessage(obstacle, 'action'), 2100);
     obstacle.encountered = true;
     obstacle.state = 'approached';
     currentObstacleId = obstacle.id;
@@ -720,11 +1022,16 @@ function resetObstacleProgress(): void {
   collisionCount = 0;
   blockedAttemptCount = 0;
   roughZoneSeconds = 0;
+  caneScanCount = 0;
+  directionDeviation = 0;
+  inputReadyAt = 0;
+  hadMovementInput = false;
   collisionLabel.textContent = '0회';
   updateObstaclePanel();
 }
 
 function resetMission(lockAfter = false): void {
+  startPosition.y = currentPersona.cameraHeight;
   camera.position.copy(startPosition);
   camera.rotation.set(0, 0, 0);
   velocity.set(0, 0, 0);
@@ -736,7 +1043,7 @@ function resetMission(lockAfter = false): void {
   lastContext = '';
   contextOverrideUntil = 0;
   resetObstacleProgress();
-  setContext('출발', '학교 정문에서 첫 번째 장애물 방향으로 이동하세요.');
+  setContext('출발', `${currentPersona.shortName} 모드입니다. 첫 번째 장애물 방향으로 이동하세요.`);
   updateHud(0);
   if (lockAfter) controls.lock();
 }
@@ -805,7 +1112,7 @@ function updateObstacleTracking(): void {
       obstacle.passed = true;
       obstacle.encountered = true;
       obstacle.state = 'passed';
-      setContextOverride('결과', obstacle.result, 1800);
+      setContextOverride('결과', getPersonaMessage(obstacle, 'result'), 1800);
     }
     if (!obstacle.passed && distance <= obstacle.detectionRadius && distance < nearestDistance) {
       nearest = obstacle;
@@ -819,11 +1126,11 @@ function updateObstacleTracking(): void {
     if (!obstacle.encountered) {
       obstacle.encountered = true;
       obstacle.state = 'approached';
-      setContextOverride('상황인지', obstacle.approach, 2200);
+      setContextOverride('상황인지', getPersonaMessage(obstacle, 'approach'), 2200);
     } else if (performance.now() >= contextOverrideUntil && guideEnabled) {
       const ratio = nearestDistance / obstacle.detectionRadius;
-      if (ratio > 0.52) setContext('상황인지', obstacle.approach);
-      else setContext('상황판단', obstacle.decision);
+      if (ratio > 0.52) setContext('상황인지', getPersonaMessage(obstacle, 'approach'));
+      else setContext('상황판단', getPersonaMessage(obstacle, 'decision'));
     }
   } else {
     currentObstacleId = null;
@@ -843,6 +1150,10 @@ function updateHud(speed: number): void {
   distanceLabel.textContent = `${Math.max(0, Math.round(distance))} m`;
   speedLabel.textContent = `${speed.toFixed(1)} m/s`;
   walkedLabel.textContent = `${Math.round(walkedDistance)} m`;
+  personaNameLabel.textContent = currentPersona.name;
+  personaBottleneckLabel.textContent = currentPersona.bottleneck;
+  cameraHeightLabel.textContent = `${currentPersona.cameraHeight.toFixed(2)} m`;
+  personaSpeedLabel.textContent = `${Math.round(currentPersona.speedMultiplier * 100)}%`;
   missionProgress.style.width = `${Math.round(progress * 100)}%`;
 }
 
@@ -903,6 +1214,11 @@ function completeMission(): void {
   resultCollisions.textContent = `${collisionCount}회`;
   resultBlocked.textContent = `${blockedAttemptCount}회`;
   resultRough.textContent = `${Math.round(roughZoneSeconds)}초`;
+  resultPersona.textContent = currentPersona.name;
+  resultBottleneck.textContent = currentPersona.bottleneck;
+  resultCaneScans.textContent = currentPersona.id === 'P-03' ? `${caneScanCount}회` : '해당 없음';
+  resultDirection.textContent = currentPersona.id === 'P-03' ? `${directionDeviation.toFixed(1)}°` : '해당 없음';
+  resultPersonaNote.textContent = currentPersona.resultNote;
   setTimeout(() => openModal('complete-modal'), 180);
 }
 
@@ -926,6 +1242,7 @@ function handleMovement(delta: number): number {
   if (!controls.isLocked || missionComplete) {
     velocity.x = THREE.MathUtils.damp(velocity.x, 0, 12, delta);
     velocity.z = THREE.MathUtils.damp(velocity.z, 0, 12, delta);
+    hadMovementInput = false;
     return 0;
   }
 
@@ -933,15 +1250,21 @@ function handleMovement(delta: number): number {
   const backward = keys.has('KeyS') || keys.has('ArrowDown');
   const left = keys.has('KeyA') || keys.has('ArrowLeft');
   const right = keys.has('KeyD') || keys.has('ArrowRight');
+  const hasMovementInput = forward || backward || left || right;
+  const now = performance.now();
+
+  if (hasMovementInput && !hadMovementInput) inputReadyAt = now + currentPersona.reactionDelay * 1000;
+  hadMovementInput = hasMovementInput;
+  const inputEnabled = !hasMovementInput || now >= inputReadyAt;
 
   const effects = getEnvironmentEffects(camera.position);
   if (effects.rough) roughZoneSeconds += delta;
 
-  const acceleration = 12;
+  const acceleration = currentPersona.id === 'P-02' ? 7.5 : 12;
   const friction = 10;
-  const maxSpeed = BASE_MAX_SPEED * effects.speedMultiplier;
-  const desiredZ = (Number(backward) - Number(forward)) * maxSpeed;
-  const desiredX = (Number(right) - Number(left)) * maxSpeed;
+  const maxSpeed = BASE_MAX_SPEED * currentPersona.speedMultiplier * effects.speedMultiplier;
+  const desiredZ = inputEnabled ? (Number(backward) - Number(forward)) * maxSpeed : 0;
+  const desiredX = inputEnabled ? (Number(right) - Number(left)) * maxSpeed * currentPersona.strafeMultiplier : 0;
   velocity.z = THREE.MathUtils.damp(velocity.z, desiredZ, forward || backward ? acceleration : friction, delta);
   velocity.x = THREE.MathUtils.damp(velocity.x, desiredX, left || right ? acceleration : friction, delta);
 
@@ -965,6 +1288,15 @@ function handleMovement(delta: number): number {
       camera.position.copy(afterX);
       registerCollision(collider);
     }
+  }
+
+  if (currentPersona.id === 'P-03' && effects.activeObstacleId === 'O-04' && inputEnabled && (forward || backward)) {
+    const driftBefore = camera.position.clone();
+    const drift = (forward ? 1 : -1) * 0.11 * delta;
+    camera.position.x += drift;
+    const collider = findBlockingCollider(camera.position);
+    if (collider) camera.position.copy(driftBefore);
+    else directionDeviation += Math.abs(drift) * 18;
   }
 
   const moved = previousPosition.distanceTo(camera.position);
@@ -1004,23 +1336,42 @@ function animate(): void {
 }
 
 function bindEvents(): void {
-  query<HTMLButtonElement>('#start-button').addEventListener('click', () => {
-    closeModal('intro-modal');
+  query<HTMLButtonElement>('#start-button').addEventListener('click', openPersonaSelection);
+
+  document.querySelectorAll<HTMLButtonElement>('[data-persona-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectedPersonaId = button.dataset.personaId as PersonaId;
+      renderPersonaSelection();
+    });
+  });
+
+  query<HTMLButtonElement>('#persona-start-button').addEventListener('click', () => {
+    applyPersona(selectedPersonaId);
+    closeModal('persona-modal');
     resetMission(false);
     controls.lock();
+  });
+  query<HTMLButtonElement>('#persona-back-button').addEventListener('click', () => {
+    closeModal('persona-modal');
+    if (hasStarted && !missionComplete) openModal('pause-modal');
+    else openModal('intro-modal');
   });
 
   query<HTMLButtonElement>('#resume-button').addEventListener('click', () => {
     closeModal('pause-modal');
     controls.lock();
   });
+  query<HTMLButtonElement>('#change-persona-button').addEventListener('click', openPersonaSelection);
   query<HTMLButtonElement>('#reset-button').addEventListener('click', () => resetMission(true));
-  query<HTMLButtonElement>('#replay-button').addEventListener('click', () => resetMission(true));
+  query<HTMLButtonElement>('#replay-button').addEventListener('click', () => {
+    closeModal('complete-modal');
+    resetMission(true);
+  });
   query<HTMLButtonElement>('#return-button').addEventListener('click', returnToIntro);
 
   query<HTMLButtonElement>('#settings-button').addEventListener('click', () => {
-    controls.unlock();
     openModal('settings-modal');
+    controls.unlock();
   });
   query<HTMLButtonElement>('#pause-settings-button').addEventListener('click', () => openModal('settings-modal'));
   query<HTMLButtonElement>('#settings-close-button').addEventListener('click', () => {
@@ -1035,8 +1386,8 @@ function bindEvents(): void {
   });
 
   query<HTMLButtonElement>('#help-button').addEventListener('click', () => {
-    controls.unlock();
     openModal('help-modal');
+    controls.unlock();
   });
   query<HTMLButtonElement>('#help-close-button').addEventListener('click', () => {
     closeModal('help-modal');
@@ -1045,6 +1396,7 @@ function bindEvents(): void {
 
   controls.addEventListener('lock', () => {
     closeModal('pause-modal');
+    closeModal('persona-modal');
     closeModal('help-modal');
     closeModal('settings-modal');
   });
@@ -1057,6 +1409,10 @@ function bindEvents(): void {
     if (event.code === 'KeyR' && hasStarted && !anyModalOpen()) {
       event.preventDefault();
       resetMission(controls.isLocked);
+    }
+    if (event.code === 'KeyF' && currentPersona.id === 'P-03' && !anyModalOpen()) {
+      event.preventDefault();
+      performCaneScan();
     }
   });
   window.addEventListener('keyup', (event) => keys.delete(event.code));
@@ -1072,6 +1428,7 @@ function bindEvents(): void {
 }
 
 createWorld();
+applyPersona('P-00');
 bindEvents();
 updateSignal(0);
 updateHud(0);
