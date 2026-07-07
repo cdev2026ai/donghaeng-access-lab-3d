@@ -16,7 +16,7 @@
           <span class="brand-mark" aria-hidden="true">동행</span>
           <div>
             <strong>Access Lab 3D</strong>
-            <span>미션·결과 · v0.6.1</span>
+            <span>미션·결과 · v0.6.2</span>
           </div>
         </div>
         <div class="top-actions">
@@ -152,7 +152,7 @@
 
       <section id="intro-modal" class="modal-layer is-open" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <div class="modal intro-panel">
-          <div class="modal-kicker">동행 Access Lab 3D · v0.6.1-classroom</div>
+          <div class="modal-kicker">동행 Access Lab 3D · v0.6.2-result-layout</div>
           <h2 id="intro-title">장벽을 발견하고, 판단하고, 행동해 보세요.</h2>
           <p class="lead">장애물마다 접근 → 상황인지 → 판단 → 동작수행 → 결과가 진행되며, 이동 조건에 따라 피로·불안·방향 확신도·시간 압박이 변합니다.</p>
           <div class="notice-box">
@@ -343,12 +343,12 @@
             <strong>이 유형에서 관찰할 점</strong>
             <p id="result-persona-note"></p>
           </div>
-          <div class="result-primary-actions">
-            <button id="change-persona-result-button" class="primary-button" type="button">다른 유형 체험</button>
-          </div>
-          <div class="result-secondary-actions">
-            <button id="replay-button" class="secondary-button" type="button">같은 유형 다시 체험</button>
-            <button id="return-button" class="secondary-button" type="button">시작 화면</button>
+          <div class="result-actions" aria-label="체험 후 다음 단계">
+            <button id="change-persona-result-button" class="primary-button result-action-primary" type="button">다른 유형 체험</button>
+            <div class="result-actions-secondary">
+              <button id="replay-button" class="secondary-button" type="button">같은 유형 다시 체험</button>
+              <button id="return-button" class="secondary-button" type="button">시작 화면</button>
+            </div>
           </div>
         </div>
       </section>
