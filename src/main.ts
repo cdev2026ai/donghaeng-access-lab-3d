@@ -2,13 +2,53 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import './style.css';
 
-type ModalId = 'intro-modal' | 'persona-modal' | 'pause-modal' | 'complete-modal' | 'settings-modal' | 'help-modal';
+type ModalId = 'intro-modal' | 'persona-modal' | 'event-modal' | 'pause-modal' | 'complete-modal' | 'settings-modal' | 'help-modal';
 type SignalPhase = 'go' | 'wait' | 'stop';
 type ObstacleId = 'O-01' | 'O-02' | 'O-03' | 'O-04' | 'O-05';
-type ObstacleState = 'ready' | 'approached' | 'passed' | 'disabled';
+type ObstacleState = 'ready' | 'approach' | 'sensing' | 'decision' | 'action' | 'passed' | 'disabled';
 type PersonaId = 'P-00' | 'P-01' | 'P-02' | 'P-03';
 type PersonaMessagePhase = 'approach' | 'decision' | 'action' | 'result';
 type CurbMode = 'pass' | 'slow' | 'blocked';
+type EventPhase = 'approach' | 'sensing' | 'decision' | 'action' | 'result';
+type DecisionKind = 'safe' | 'risky' | 'recheck';
+
+type EventChoice = {
+  id: string;
+  label: string;
+  description: string;
+  kind: DecisionKind;
+};
+
+type ActiveEvent = {
+  obstacleId: ObstacleId;
+  phase: EventPhase;
+  startedAt: number;
+  phaseStartedAt: number;
+  sensingComplete: boolean;
+  sensingMethod: string;
+  decisionOpenedAt: number;
+  selectedChoice: EventChoice | null;
+  decisionAt: number;
+  actionStartedAt: number;
+  collisionsAtStart: number;
+  blockedAtStart: number;
+  rechecks: number;
+};
+
+type EventRecord = {
+  obstacleId: ObstacleId;
+  obstacleName: string;
+  personaId: PersonaId;
+  sensingMethod: string;
+  decisionLabel: string;
+  decisionKind: DecisionKind;
+  decisionSeconds: number;
+  actionSeconds: number;
+  collisions: number;
+  blockedAttempts: number;
+  rechecks: number;
+  outcome: string;
+};
 
 type BoxCollider = {
   box: THREE.Box3;
@@ -304,6 +344,8 @@ let caneScanCount = 0;
 let directionDeviation = 0;
 let inputReadyAt = 0;
 let hadMovementInput = false;
+let activeEvent: ActiveEvent | null = null;
+let eventRecords: EventRecord[] = [];
 
 const query = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
@@ -345,6 +387,393 @@ const resultBottleneck = query<HTMLElement>('#result-bottleneck');
 const resultCaneScans = query<HTMLElement>('#result-cane-scans');
 const resultDirection = query<HTMLElement>('#result-direction');
 const resultPersonaNote = query<HTMLElement>('#result-persona-note');
+const eventFlowTitle = query<HTMLElement>('#event-flow-title');
+const eventFlowCounter = query<HTMLElement>('#event-flow-counter');
+const eventFlowSummary = query<HTMLElement>('#event-flow-summary');
+const eventKicker = query<HTMLElement>('#event-kicker');
+const eventTitle = query<HTMLElement>('#event-title');
+const eventObstacleBadge = query<HTMLElement>('#event-obstacle-badge');
+const eventBody = query<HTMLElement>('#event-body');
+const eventChoiceList = query<HTMLElement>('#event-choice-list');
+const eventFeedback = query<HTMLElement>('#event-feedback');
+const eventPrimaryButton = query<HTMLButtonElement>('#event-primary-button');
+const eventSecondaryButton = query<HTMLButtonElement>('#event-secondary-button');
+const eventShortcutHint = query<HTMLElement>('#event-shortcut-hint');
+const resultEvents = query<HTMLElement>('#result-events');
+const resultSafeDecisions = query<HTMLElement>('#result-safe-decisions');
+const resultRechecks = query<HTMLElement>('#result-rechecks');
+const resultDecisionTime = query<HTMLElement>('#result-decision-time');
+const resultEventLog = query<HTMLOListElement>('#result-event-log');
+
+
+const EVENT_PHASE_ORDER: EventPhase[] = ['approach', 'sensing', 'decision', 'action', 'result'];
+const EVENT_PHASE_LABEL: Record<EventPhase, string> = {
+  approach: '접근',
+  sensing: '상황인지',
+  decision: '판단',
+  action: '동작수행',
+  result: '결과',
+};
+
+function getEventChoices(obstacleId: ObstacleId): EventChoice[] {
+  const choices: Record<ObstacleId, EventChoice[]> = {
+    'O-01': [
+      { id: 'safe-ramp', label: '오른쪽 경사 통로로 우회한다', description: '단차를 직접 넘지 않고 경사 통로의 위치와 폭을 확인해 이동합니다.', kind: 'safe' },
+      { id: 'risky-direct', label: '정면으로 단차 통과를 시도한다', description: '현재 이동 조건에서 턱을 직접 넘을 수 있다고 가정하고 전진합니다.', kind: 'risky' },
+      { id: 'recheck-height', label: '단차 높이와 우회로를 다시 확인한다', description: '바닥 높이 변화와 오른쪽 통로 정보를 한 번 더 확인합니다.', kind: 'recheck' },
+    ],
+    'O-02': [
+      { id: 'safe-slow', label: '속도를 낮추고 경사에 천천히 진입한다', description: '경사 시작점에서 방향을 정렬하고 일정한 속도로 이동합니다.', kind: 'safe' },
+      { id: 'risky-fast', label: '현재 속도로 바로 진입한다', description: '기울기와 이동 부담을 충분히 확인하지 않고 경사에 진입합니다.', kind: 'risky' },
+      { id: 'recheck-slope', label: '경사 길이와 기울기를 다시 확인한다', description: '경사 구간의 시작·끝과 쉴 수 있는 지점을 재확인합니다.', kind: 'recheck' },
+    ],
+    'O-03': [
+      { id: 'safe-align', label: '통로 폭을 확인하고 넓은 쪽으로 우회한다', description: '차량과 보도 경계를 확인하고 충돌 가능성이 낮은 경로를 선택합니다.', kind: 'safe' },
+      { id: 'risky-road', label: '차도 쪽으로 바로 우회한다', description: '차량 접근 정보가 충분하지 않은 상태에서 차도 쪽으로 이동합니다.', kind: 'risky' },
+      { id: 'recheck-width', label: '통로 폭과 차량 위치를 다시 확인한다', description: '몸·휠체어·지팡이가 지나갈 폭인지 한 번 더 확인합니다.', kind: 'recheck' },
+    ],
+    'O-04': [
+      { id: 'safe-reorient', label: '멈춘 뒤 바닥 정보를 다시 잡고 이동한다', description: '유도 정보가 끊긴 지점에서 감속하고 방향을 재설정합니다.', kind: 'safe' },
+      { id: 'risky-continue', label: '기존 방향을 그대로 유지한다', description: '점자블록 단절과 거친 노면을 확인하지 않고 계속 이동합니다.', kind: 'risky' },
+      { id: 'recheck-floor', label: '바닥과 유도 정보의 연결을 다시 확인한다', description: '점자블록 단절, 잘못된 연결, 평탄한 우회면을 재확인합니다.', kind: 'recheck' },
+    ],
+    'O-05': [
+      { id: 'safe-center', label: '넓은 간격에 정렬한 뒤 천천히 통과한다', description: '볼라드 간격과 입간판 돌출을 확인하고 진입 각도를 조정합니다.', kind: 'safe' },
+      { id: 'risky-angle', label: '현재 각도로 바로 진입한다', description: '폭과 회전 반경을 충분히 확인하지 않고 시설물 사이로 이동합니다.', kind: 'risky' },
+      { id: 'recheck-gap', label: '간격과 돌출물 위치를 다시 확인한다', description: '지면 장애물과 상체 높이의 돌출물을 함께 재확인합니다.', kind: 'recheck' },
+    ],
+  };
+
+  const result = choices[obstacleId].map((choice) => ({ ...choice }));
+  if (currentPersona.id === 'P-01' && obstacleId === 'O-03') {
+    result[0].label = '보도 통과를 중단하고 넓은 우회 경로를 찾는다';
+    result[0].description = '휠체어 폭보다 좁은 통로에 진입하지 않고 되돌아가 우회합니다.';
+  }
+  if (currentPersona.id === 'P-03' && obstacleId === 'O-01') {
+    result[0].label = '지팡이로 턱을 확인하고 경사 통로 방향을 탐색한다';
+  }
+  if (currentPersona.id === 'P-02' && obstacleId === 'O-02') {
+    result[0].label = '잠시 멈춰 호흡을 조절한 뒤 천천히 이동한다';
+  }
+  return result;
+}
+
+function getSensingPrompt(obstacle: ObstacleDefinition): string {
+  if (currentPersona.id === 'P-03') {
+    return `${obstacle.shortName} 앞입니다. F 키 또는 아래 버튼으로 흰지팡이·바닥 정보를 확인하세요.`;
+  }
+  if (currentPersona.id === 'P-01') {
+    return `${obstacle.shortName}의 높이·폭·경사와 휠체어 통과 가능성을 확인하세요.`;
+  }
+  if (currentPersona.id === 'P-02') {
+    return `${obstacle.shortName}을 가까이에서 확인하고 균형·피로·판단 시간을 고려하세요.`;
+  }
+  return `${obstacle.shortName}의 위치, 크기, 우회 공간을 확인하세요.`;
+}
+
+function getSensingResult(obstacle: ObstacleDefinition): string {
+  const base: Record<ObstacleId, string> = {
+    'O-01': '전방에 높은 단차가 있고 오른쪽에 경사 통로가 있습니다.',
+    'O-02': '경사가 길게 이어지며 진입 후 이동 속도가 감소합니다.',
+    'O-03': '주차 차량이 보도를 막아 통로 폭이 줄고 차도 우회 위험이 생겼습니다.',
+    'O-04': '점자블록이 끊기고 잘못된 방향으로 연결되며 바닥도 고르지 않습니다.',
+    'O-05': '볼라드 간격이 좁고 입간판이 비스듬히 돌출되어 있습니다.',
+  };
+  return `${base[obstacle.id]} ${getPersonaMessage(obstacle, 'decision')}`;
+}
+
+function getActionInstruction(obstacle: ObstacleDefinition, choice: EventChoice): string {
+  const prefix = choice.kind === 'safe' ? '선택한 안전 경로' : '선택한 직접 경로';
+  return `${prefix}: ${choice.label}. ${getPersonaMessage(obstacle, 'action')}`;
+}
+
+function setEventPhase(phase: EventPhase): void {
+  if (!activeEvent) return;
+  activeEvent.phase = phase;
+  activeEvent.phaseStartedAt = performance.now();
+  const obstacle = obstacles.get(activeEvent.obstacleId);
+  if (obstacle && phase !== 'result') obstacle.state = phase;
+  renderEventFlow();
+  renderEventModal();
+  updateObstaclePanel();
+}
+
+function beginObstacleEvent(obstacle: ObstacleDefinition): void {
+  if (activeEvent || obstacle.passed || !obstacle.enabled) return;
+  const now = performance.now();
+  activeEvent = {
+    obstacleId: obstacle.id,
+    phase: 'approach',
+    startedAt: now,
+    phaseStartedAt: now,
+    sensingComplete: false,
+    sensingMethod: '',
+    decisionOpenedAt: 0,
+    selectedChoice: null,
+    decisionAt: 0,
+    actionStartedAt: 0,
+    collisionsAtStart: collisionCount,
+    blockedAtStart: blockedAttemptCount,
+    rechecks: 0,
+  };
+  obstacle.encountered = true;
+  obstacle.state = 'approach';
+  currentObstacleId = obstacle.id;
+  setContext('접근', getPersonaMessage(obstacle, 'approach'));
+  openModal('event-modal');
+  controls.unlock();
+  renderEventFlow();
+  renderEventModal();
+  updateObstaclePanel();
+}
+
+function performEventSensing(): void {
+  if (!activeEvent || activeEvent.phase !== 'sensing') return;
+  const obstacle = obstacles.get(activeEvent.obstacleId);
+  if (!obstacle) return;
+  activeEvent.sensingComplete = true;
+  activeEvent.sensingMethod = currentPersona.id === 'P-03'
+    ? '흰지팡이·바닥 정보 확인'
+    : currentPersona.id === 'P-01'
+      ? '치수·통과 가능성 확인'
+      : currentPersona.id === 'P-02'
+        ? '근거리 확인·균형 점검'
+        : '시각·공간 정보 확인';
+  if (currentPersona.id === 'P-03') caneScanCount += 1;
+  renderEventModal();
+  renderEventFlow();
+}
+
+function openDecisionPhase(): void {
+  if (!activeEvent || !activeEvent.sensingComplete) return;
+  activeEvent.decisionOpenedAt = performance.now();
+  activeEvent.selectedChoice = null;
+  setEventPhase('decision');
+}
+
+function selectEventChoice(choiceId: string): void {
+  if (!activeEvent || activeEvent.phase !== 'decision') return;
+  const choice = getEventChoices(activeEvent.obstacleId).find((item) => item.id === choiceId);
+  if (!choice) return;
+  activeEvent.selectedChoice = choice;
+  renderEventModal();
+}
+
+function recheckEventSituation(): void {
+  if (!activeEvent || activeEvent.phase !== 'decision') return;
+  activeEvent.rechecks += 1;
+  activeEvent.sensingComplete = false;
+  activeEvent.sensingMethod = '';
+  activeEvent.selectedChoice = null;
+  setEventPhase('sensing');
+}
+
+function applyEventDecision(): void {
+  if (!activeEvent || activeEvent.phase !== 'decision' || !activeEvent.selectedChoice) return;
+  const obstacle = obstacles.get(activeEvent.obstacleId);
+  if (!obstacle) return;
+  const choice = activeEvent.selectedChoice;
+  if (choice.kind === 'recheck') {
+    recheckEventSituation();
+    return;
+  }
+  activeEvent.decisionAt = performance.now();
+  activeEvent.actionStartedAt = activeEvent.decisionAt;
+  activeEvent.phase = 'action';
+  activeEvent.phaseStartedAt = activeEvent.decisionAt;
+  obstacle.state = 'action';
+  closeModal('event-modal');
+  setContext('동작수행', getActionInstruction(obstacle, choice));
+  renderEventFlow();
+  updateObstaclePanel();
+  controls.lock();
+}
+
+function getEventOutcome(record: Omit<EventRecord, 'outcome'>): string {
+  if (record.decisionKind === 'safe' && record.collisions === 0 && record.blockedAttempts === 0) return '안전한 판단으로 충돌 없이 통과';
+  if (record.decisionKind === 'safe') return '안전 경로를 선택했지만 수행 중 재시도 발생';
+  if (record.collisions > 0 || record.blockedAttempts > 0) return '위험한 판단 뒤 충돌 또는 이동 차단 발생';
+  return '직접 경로로 통과했지만 위험 요인을 남김';
+}
+
+function completeObstacleEvent(obstacle: ObstacleDefinition): void {
+  if (!activeEvent || activeEvent.obstacleId !== obstacle.id || activeEvent.phase !== 'action' || !activeEvent.selectedChoice) return;
+  const now = performance.now();
+  const partial: Omit<EventRecord, 'outcome'> = {
+    obstacleId: obstacle.id,
+    obstacleName: obstacle.shortName,
+    personaId: currentPersona.id,
+    sensingMethod: activeEvent.sensingMethod || '정보 확인',
+    decisionLabel: activeEvent.selectedChoice.label,
+    decisionKind: activeEvent.selectedChoice.kind,
+    decisionSeconds: Math.max(0, (activeEvent.decisionAt - activeEvent.decisionOpenedAt) / 1000),
+    actionSeconds: Math.max(0, (now - activeEvent.actionStartedAt) / 1000),
+    collisions: Math.max(0, collisionCount - activeEvent.collisionsAtStart),
+    blockedAttempts: Math.max(0, blockedAttemptCount - activeEvent.blockedAtStart),
+    rechecks: activeEvent.rechecks,
+  };
+  const record: EventRecord = { ...partial, outcome: getEventOutcome(partial) };
+  eventRecords.push(record);
+  obstacle.passed = true;
+  obstacle.encountered = true;
+  obstacle.state = 'passed';
+  activeEvent.phase = 'result';
+  activeEvent.phaseStartedAt = now;
+  currentObstacleId = obstacle.id;
+  setContext('결과', `${getPersonaMessage(obstacle, 'result')} ${record.outcome}`);
+  openModal('event-modal');
+  controls.unlock();
+  renderEventFlow();
+  renderEventModal();
+  updateObstaclePanel();
+}
+
+function continueAfterEventResult(): void {
+  if (!activeEvent || activeEvent.phase !== 'result') return;
+  activeEvent = null;
+  currentObstacleId = null;
+  closeModal('event-modal');
+  renderEventFlow();
+  updateObstaclePanel();
+  if (!missionComplete) controls.lock();
+}
+
+function advanceEventPrimary(): void {
+  if (!activeEvent) return;
+  if (activeEvent.phase === 'approach') {
+    setEventPhase('sensing');
+    return;
+  }
+  if (activeEvent.phase === 'sensing') {
+    if (!activeEvent.sensingComplete) performEventSensing();
+    else openDecisionPhase();
+    return;
+  }
+  if (activeEvent.phase === 'decision') {
+    applyEventDecision();
+    return;
+  }
+  if (activeEvent.phase === 'result') continueAfterEventResult();
+}
+
+function renderEventFlow(): void {
+  eventFlowCounter.textContent = `${eventRecords.length} / ${getEnabledObstacleCount()} 완료`;
+  document.querySelectorAll<HTMLElement>('[data-event-stage]').forEach((chip) => {
+    chip.classList.remove('is-active', 'is-done');
+    if (!activeEvent) return;
+    const phase = chip.dataset.eventStage as EventPhase;
+    const phaseIndex = EVENT_PHASE_ORDER.indexOf(phase);
+    const activeIndex = EVENT_PHASE_ORDER.indexOf(activeEvent.phase);
+    if (phaseIndex < activeIndex) chip.classList.add('is-done');
+    if (phaseIndex === activeIndex) chip.classList.add('is-active');
+  });
+
+  if (!activeEvent) {
+    eventFlowTitle.textContent = eventRecords.length ? '다음 장애물로 이동' : '이동 중';
+    eventFlowSummary.textContent = eventRecords.length
+      ? '다음 장애물의 감지 범위에 들어가면 새 이벤트가 시작됩니다.'
+      : '장애물에 가까이 가면 이벤트가 시작됩니다.';
+    return;
+  }
+  const obstacle = obstacles.get(activeEvent.obstacleId);
+  eventFlowTitle.textContent = `${activeEvent.obstacleId} ${obstacle?.shortName ?? ''}`;
+  if (activeEvent.phase === 'action') {
+    eventFlowSummary.textContent = activeEvent.selectedChoice?.label ?? '선택한 방법으로 직접 이동하세요.';
+  } else if (activeEvent.phase === 'result') {
+    eventFlowSummary.textContent = eventRecords.at(-1)?.outcome ?? '통과 결과를 확인하세요.';
+  } else {
+    eventFlowSummary.textContent = `${EVENT_PHASE_LABEL[activeEvent.phase]} 단계를 진행하고 있습니다.`;
+  }
+}
+
+function renderEventModal(): void {
+  if (!activeEvent) return;
+  const obstacle = obstacles.get(activeEvent.obstacleId);
+  if (!obstacle) return;
+  eventObstacleBadge.textContent = `${obstacle.id} · ${obstacle.shortName}`;
+  eventKicker.textContent = `${EVENT_PHASE_LABEL[activeEvent.phase]} · ${currentPersona.shortName}`;
+  eventChoiceList.innerHTML = '';
+  eventChoiceList.hidden = activeEvent.phase !== 'decision';
+  eventFeedback.hidden = true;
+  eventSecondaryButton.hidden = true;
+  eventPrimaryButton.disabled = false;
+
+  document.querySelectorAll<HTMLElement>('[data-event-modal-stage]').forEach((chip) => {
+    chip.classList.remove('is-active', 'is-done');
+    const phase = chip.dataset.eventModalStage as EventPhase;
+    const phaseIndex = EVENT_PHASE_ORDER.indexOf(phase);
+    const activeIndex = EVENT_PHASE_ORDER.indexOf(activeEvent!.phase);
+    if (phaseIndex < activeIndex) chip.classList.add('is-done');
+    if (phaseIndex === activeIndex) chip.classList.add('is-active');
+  });
+
+  if (activeEvent.phase === 'approach') {
+    eventTitle.textContent = '장애물에 접근했습니다.';
+    eventBody.innerHTML = `<strong>${getPersonaMessage(obstacle, 'approach')}</strong><p>이동을 잠시 멈추고 어떤 정보가 필요한지 확인합니다.</p>`;
+    eventPrimaryButton.textContent = '상황 확인하기';
+    eventShortcutHint.textContent = 'Enter 키로 상황인지 단계로 이동할 수 있습니다.';
+    return;
+  }
+
+  if (activeEvent.phase === 'sensing') {
+    eventTitle.textContent = '어떤 정보를 확인해야 할까요?';
+    eventBody.innerHTML = `<strong>${getSensingPrompt(obstacle)}</strong><p>환경 정보를 확인한 뒤 판단 단계로 이동하세요.</p>`;
+    if (activeEvent.sensingComplete) {
+      eventFeedback.hidden = false;
+      eventFeedback.innerHTML = `<b>확인한 정보</b><span>${getSensingResult(obstacle)}</span><small>확인 방법: ${activeEvent.sensingMethod}</small>`;
+      eventPrimaryButton.textContent = '판단 단계로';
+    } else {
+      eventPrimaryButton.textContent = currentPersona.id === 'P-03' ? 'F · 지팡이로 확인' : '환경 정보 확인';
+    }
+    eventShortcutHint.textContent = currentPersona.id === 'P-03'
+      ? 'F 키로도 상황 정보를 확인할 수 있습니다.'
+      : 'Enter 키로 정보를 확인할 수 있습니다.';
+    return;
+  }
+
+  if (activeEvent.phase === 'decision') {
+    eventTitle.textContent = '어떻게 이동할지 선택하세요.';
+    eventBody.innerHTML = `<strong>${getPersonaMessage(obstacle, 'decision')}</strong><p>선택은 수행 결과와 마지막 이벤트 기록에 반영됩니다.</p>`;
+    const choices = getEventChoices(obstacle.id);
+    choices.forEach((choice, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'event-choice';
+      button.dataset.choiceId = choice.id;
+      button.dataset.kind = choice.kind;
+      button.setAttribute('role', 'radio');
+      const selected = activeEvent?.selectedChoice?.id === choice.id;
+      button.setAttribute('aria-checked', String(selected));
+      button.classList.toggle('is-selected', selected);
+      button.innerHTML = `<span>${index + 1}</span><div><strong>${choice.label}</strong><small>${choice.description}</small></div><em>${choice.kind === 'safe' ? '안전 중심' : choice.kind === 'risky' ? '위험 가능' : '재확인'}</em>`;
+      button.addEventListener('click', () => selectEventChoice(choice.id));
+      eventChoiceList.append(button);
+    });
+    eventPrimaryButton.textContent = '선택 적용';
+    eventPrimaryButton.disabled = !activeEvent.selectedChoice;
+    eventSecondaryButton.hidden = false;
+    eventSecondaryButton.textContent = '상황 다시 확인';
+    eventShortcutHint.textContent = '숫자 1·2·3으로 선택하고 Enter로 적용할 수 있습니다.';
+    return;
+  }
+
+  if (activeEvent.phase === 'result') {
+    const record = eventRecords.at(-1);
+    eventTitle.textContent = '이번 장애물의 결과입니다.';
+    eventBody.innerHTML = record
+      ? `<div class="event-result-card"><strong>${record.outcome}</strong><dl><div><dt>확인</dt><dd>${record.sensingMethod}</dd></div><div><dt>판단</dt><dd>${record.decisionLabel}</dd></div><div><dt>수행</dt><dd>${record.actionSeconds.toFixed(1)}초 · 충돌 ${record.collisions}회 · 차단 ${record.blockedAttempts}회</dd></div></dl></div>`
+      : `<strong>${getPersonaMessage(obstacle, 'result')}</strong>`;
+    eventPrimaryButton.textContent = '다음 구간으로';
+    eventShortcutHint.textContent = '결과를 확인한 뒤 다음 장애물로 이동하세요.';
+  }
+}
+
+function resetEventSystem(): void {
+  activeEvent = null;
+  eventRecords = [];
+  closeModal('event-modal');
+  renderEventFlow();
+}
 
 
 function getPersonaMessage(obstacle: ObstacleDefinition, phase: PersonaMessagePhase): string {
@@ -1001,7 +1430,7 @@ function registerCollision(collider: BoxCollider): void {
   if (obstacle) {
     setContextOverride('동작수행', getPersonaMessage(obstacle, 'action'), 2100);
     obstacle.encountered = true;
-    obstacle.state = 'approached';
+    obstacle.state = activeEvent?.obstacleId === obstacle.id ? activeEvent.phase === 'result' ? 'passed' : activeEvent.phase : 'approach';
     currentObstacleId = obstacle.id;
     updateObstaclePanel();
   }
@@ -1027,6 +1456,7 @@ function resetObstacleProgress(): void {
   inputReadyAt = 0;
   hadMovementInput = false;
   collisionLabel.textContent = '0회';
+  resetEventSystem();
   updateObstaclePanel();
 }
 
@@ -1102,36 +1532,44 @@ function updateSignal(totalSeconds: number): void {
 }
 
 function updateObstacleTracking(): void {
+  // 시작 화면 또는 이동약자 유형 선택 단계에서는 장애물 이벤트를 열지 않습니다.
+  if (!hasStarted || missionComplete) {
+    currentObstacleId = null;
+    return;
+  }
+
+  // 체험 시작 직후에는 첫 이동이 확인된 뒤 장애물 이벤트를 활성화합니다.
+  // 시작 위치가 O-01 감지 반경 안에 있어도 선택 화면보다 이벤트가 먼저 뜨지 않게 합니다.
+  if (!activeEvent && walkedDistance < 0.15) return;
+
+  // 일시정지·설정·도움말 화면이 열려 있을 때 새 이벤트가 끼어들지 않게 합니다.
+  if (!activeEvent && anyModalOpen()) return;
+
+  if (activeEvent) {
+    const obstacle = obstacles.get(activeEvent.obstacleId);
+    currentObstacleId = activeEvent.obstacleId;
+    if (obstacle && activeEvent.phase === 'action' && !obstacle.passed && camera.position.z < obstacle.passZ) {
+      completeObstacleEvent(obstacle);
+    } else if (obstacle && activeEvent.phase === 'action' && performance.now() >= contextOverrideUntil && guideEnabled) {
+      setContext('동작수행', getActionInstruction(obstacle, activeEvent.selectedChoice ?? getEventChoices(obstacle.id)[0]));
+    }
+    updateObstaclePanel();
+    return;
+  }
+
   let nearest: ObstacleDefinition | null = null;
   let nearestDistance = Number.POSITIVE_INFINITY;
-
   obstacles.forEach((obstacle) => {
-    if (!obstacle.enabled) return;
+    if (!obstacle.enabled || obstacle.passed) return;
     const distance = camera.position.distanceTo(obstacle.center);
-    if (!obstacle.passed && camera.position.z < obstacle.passZ) {
-      obstacle.passed = true;
-      obstacle.encountered = true;
-      obstacle.state = 'passed';
-      setContextOverride('결과', getPersonaMessage(obstacle, 'result'), 1800);
-    }
-    if (!obstacle.passed && distance <= obstacle.detectionRadius && distance < nearestDistance) {
+    if (distance <= obstacle.detectionRadius && distance < nearestDistance) {
       nearest = obstacle;
       nearestDistance = distance;
     }
   });
 
   if (nearest) {
-    const obstacle = nearest as ObstacleDefinition;
-    currentObstacleId = obstacle.id;
-    if (!obstacle.encountered) {
-      obstacle.encountered = true;
-      obstacle.state = 'approached';
-      setContextOverride('상황인지', getPersonaMessage(obstacle, 'approach'), 2200);
-    } else if (performance.now() >= contextOverrideUntil && guideEnabled) {
-      const ratio = nearestDistance / obstacle.detectionRadius;
-      if (ratio > 0.52) setContext('상황인지', getPersonaMessage(obstacle, 'approach'));
-      else setContext('상황판단', getPersonaMessage(obstacle, 'decision'));
-    }
+    beginObstacleEvent(nearest);
   } else {
     currentObstacleId = null;
     if (performance.now() >= contextOverrideUntil && guideEnabled) {
@@ -1186,7 +1624,16 @@ function updateObstaclePanel(): void {
     item.dataset.state = obstacle.state;
     const status = item.querySelector<HTMLElement>('em');
     if (!status) return;
-    status.textContent = obstacle.state === 'passed' ? '통과' : obstacle.state === 'approached' ? '접근' : obstacle.state === 'disabled' ? '꺼짐' : '대기';
+    const labels: Record<ObstacleState, string> = {
+      ready: '대기',
+      approach: '접근',
+      sensing: '인지',
+      decision: '판단',
+      action: '수행',
+      passed: '통과',
+      disabled: '꺼짐',
+    };
+    status.textContent = labels[obstacle.state];
   });
 }
 
@@ -1201,6 +1648,15 @@ function setObstacleEnabled(id: ObstacleId, enabled: boolean): void {
   colliders.forEach((collider) => {
     if (collider.obstacleId === id) collider.enabled = enabled;
   });
+  if (!enabled) {
+    eventRecords = eventRecords.filter((record) => record.obstacleId !== id);
+    if (activeEvent?.obstacleId === id) {
+      activeEvent = null;
+      currentObstacleId = null;
+      closeModal('event-modal');
+    }
+  }
+  renderEventFlow();
   updateObstaclePanel();
 }
 
@@ -1218,6 +1674,22 @@ function completeMission(): void {
   resultBottleneck.textContent = currentPersona.bottleneck;
   resultCaneScans.textContent = currentPersona.id === 'P-03' ? `${caneScanCount}회` : '해당 없음';
   resultDirection.textContent = currentPersona.id === 'P-03' ? `${directionDeviation.toFixed(1)}°` : '해당 없음';
+  const safeCount = eventRecords.filter((record) => record.decisionKind === 'safe').length;
+  const recheckCount = eventRecords.reduce((sum, record) => sum + record.rechecks, 0);
+  const averageDecisionTime = eventRecords.length
+    ? eventRecords.reduce((sum, record) => sum + record.decisionSeconds, 0) / eventRecords.length
+    : 0;
+  resultEvents.textContent = `${eventRecords.length} / ${getEnabledObstacleCount()}`;
+  resultSafeDecisions.textContent = `${safeCount}회`;
+  resultRechecks.textContent = `${recheckCount}회`;
+  resultDecisionTime.textContent = `${averageDecisionTime.toFixed(1)}초`;
+  resultEventLog.innerHTML = '';
+  eventRecords.forEach((record) => {
+    const item = document.createElement('li');
+    item.dataset.kind = record.decisionKind;
+    item.innerHTML = `<span><b>${record.obstacleId}</b> ${record.obstacleName}</span><strong>${record.outcome}</strong><small>${record.decisionLabel} · 판단 ${record.decisionSeconds.toFixed(1)}초 · 수행 ${record.actionSeconds.toFixed(1)}초</small>`;
+    resultEventLog.append(item);
+  });
   resultPersonaNote.textContent = currentPersona.resultNote;
   setTimeout(() => openModal('complete-modal'), 180);
 }
@@ -1330,13 +1802,15 @@ function animate(): void {
   updateHud(speed);
   animateDestination(now / 1000);
 
-  if (!missionComplete && hasStarted && camera.position.distanceTo(destination) < 2.0) completeMission();
+  if (!missionComplete && hasStarted && !activeEvent && camera.position.distanceTo(destination) < 2.0) completeMission();
 
   renderer.render(scene, camera);
 }
 
 function bindEvents(): void {
   query<HTMLButtonElement>('#start-button').addEventListener('click', openPersonaSelection);
+  eventPrimaryButton.addEventListener('click', advanceEventPrimary);
+  eventSecondaryButton.addEventListener('click', recheckEventSituation);
 
   document.querySelectorAll<HTMLButtonElement>('[data-persona-id]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1406,6 +1880,25 @@ function bindEvents(): void {
 
   window.addEventListener('keydown', (event) => {
     keys.add(event.code);
+    if (activeEvent && getModal('event-modal').classList.contains('is-open')) {
+      if (activeEvent.phase === 'decision' && ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].includes(event.code)) {
+        event.preventDefault();
+        const index = Number(event.code.at(-1)) - 1;
+        const choice = getEventChoices(activeEvent.obstacleId)[index];
+        if (choice) selectEventChoice(choice.id);
+        return;
+      }
+      if (event.code === 'KeyF' && currentPersona.id === 'P-03' && activeEvent.phase === 'sensing') {
+        event.preventDefault();
+        performEventSensing();
+        return;
+      }
+      if (event.code === 'Enter' || event.code === 'KeyE') {
+        event.preventDefault();
+        advanceEventPrimary();
+        return;
+      }
+    }
     if (event.code === 'KeyR' && hasStarted && !anyModalOpen()) {
       event.preventDefault();
       resetMission(controls.isLocked);
@@ -1432,4 +1925,9 @@ applyPersona('P-00');
 bindEvents();
 updateSignal(0);
 updateHud(0);
+renderEventFlow();
+// HTML 상태와 관계없이 앱 최초 진입은 반드시 시작 안내 화면으로 고정합니다.
+hasStarted = false;
+activeEvent = null;
+openModal('intro-modal');
 animate();
