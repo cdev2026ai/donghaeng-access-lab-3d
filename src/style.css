@@ -1051,7 +1051,7 @@ body[data-persona="P-03"].vision-effect-active.high-contrast #scene { filter: bl
   .experience-result-summary { grid-template-columns: 1fr 1fr; }
 }
 
-/* v0.6 mission briefing, result and comparison */
+/* v0.6.1 mission briefing and result */
 .mission-mini-checks {
   display: flex;
   flex-wrap: wrap;

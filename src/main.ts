@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import './style.css';
 
-type ModalId = 'intro-modal' | 'persona-modal' | 'mission-modal' | 'event-modal' | 'pause-modal' | 'complete-modal' | 'comparison-modal' | 'settings-modal' | 'help-modal';
+type ModalId = 'intro-modal' | 'persona-modal' | 'mission-modal' | 'event-modal' | 'pause-modal' | 'complete-modal' | 'settings-modal' | 'help-modal';
 type SignalPhase = 'go' | 'wait' | 'stop';
 type ObstacleId = 'O-01' | 'O-02' | 'O-03' | 'O-04' | 'O-05';
 type ObstacleState = 'ready' | 'approach' | 'sensing' | 'decision' | 'action' | 'passed' | 'disabled';
@@ -52,11 +52,6 @@ type EventRecord = {
   outcome: string;
 };
 
-type ReflectionAnswers = {
-  hardMoment: string;
-  barrierCause: string;
-  improvement: string;
-};
 
 type MissionRun = {
   id: string;
@@ -83,7 +78,6 @@ type MissionRun = {
   minDirectionConfidence: number;
   peakTimePressure: number;
   eventRecords: EventRecord[];
-  reflection: ReflectionAnswers;
 };
 
 type ExperienceState = {
@@ -157,8 +151,6 @@ const BASE_MAX_SPEED = 3.15;
 const POINTER_SPEED = 0.72;
 const STATE_MIN = 0;
 const STATE_MAX = 100;
-const MISSION_RUN_STORAGE_KEY = 'donghaeng-access-lab-3d-runs-v1';
-const MAX_SAVED_RUNS = 8;
 const VISION_STRENGTH_MULTIPLIER: Record<EffectStrength, number> = { off: 0, low: 0.50, medium: 0.72, high: 0.88 };
 const VISION_BASE_MASK: Record<EffectStrength, number> = { off: 0, low: 0.21, medium: 0.37, high: 0.50 };
 
@@ -416,8 +408,6 @@ let caneVisibleEnabled = true;
 let caneAnimationStartedAt = -1;
 let caneAnimationContact = false;
 let caneGroup: THREE.Group | null = null;
-let currentRunId: string | null = null;
-let selectedComparisonRunIds = new Set<string>();
 
 const query = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
@@ -511,134 +501,7 @@ const resultEventStatus = query<HTMLElement>('#result-event-status');
 const resultSafetyStatus = query<HTMLElement>('#result-safety-status');
 const resultRetryStatus = query<HTMLElement>('#result-retry-status');
 const resultInsight = query<HTMLElement>('#result-insight');
-const reflectionHardMoment = query<HTMLTextAreaElement>('#reflection-hard-moment');
-const reflectionBarrierCause = query<HTMLTextAreaElement>('#reflection-barrier-cause');
-const reflectionImprovement = query<HTMLTextAreaElement>('#reflection-improvement');
-const reflectionSaveStatus = query<HTMLElement>('#reflection-save-status');
-const comparisonEmpty = query<HTMLElement>('#comparison-empty');
-const comparisonContent = query<HTMLElement>('#comparison-content');
-const comparisonRunSelector = query<HTMLElement>('#comparison-run-selector');
-const comparisonInsight = query<HTMLElement>('#comparison-insight');
-const comparisonTableHead = query<HTMLTableSectionElement>('#comparison-table-head');
-const comparisonTableBody = query<HTMLTableSectionElement>('#comparison-table-body');
 
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] ?? character);
-}
-
-function getSavedRuns(): MissionRun[] {
-  try {
-    const raw = localStorage.getItem(MISSION_RUN_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as MissionRun[];
-    return Array.isArray(parsed) ? parsed.slice(0, MAX_SAVED_RUNS) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSavedRuns(runs: MissionRun[]): void {
-  try {
-    localStorage.setItem(MISSION_RUN_STORAGE_KEY, JSON.stringify(runs.slice(0, MAX_SAVED_RUNS)));
-  } catch {
-    reflectionSaveStatus.textContent = '브라우저 저장 공간을 사용할 수 없습니다.';
-  }
-}
-
-function saveMissionRun(run: MissionRun): void {
-  const runs = getSavedRuns().filter((item) => item.id !== run.id);
-  writeSavedRuns([run, ...runs]);
-  currentRunId = run.id;
-}
-
-function getCurrentRun(): MissionRun | null {
-  if (!currentRunId) return null;
-  return getSavedRuns().find((run) => run.id === currentRunId) ?? null;
-}
-
-function updateCurrentRunReflection(): void {
-  const run = getCurrentRun();
-  if (!run) {
-    reflectionSaveStatus.textContent = '저장할 현재 결과를 찾지 못했습니다.';
-    return;
-  }
-  run.reflection = {
-    hardMoment: reflectionHardMoment.value.trim(),
-    barrierCause: reflectionBarrierCause.value.trim(),
-    improvement: reflectionImprovement.value.trim(),
-  };
-  saveMissionRun(run);
-  reflectionSaveStatus.textContent = '성찰 내용이 이 브라우저에 저장되었습니다.';
-}
-
-function downloadTextFile(filename: string, content: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: string | number): string {
-  return `"${String(value).replaceAll('"', '""')}"`;
-}
-
-function runToCsvRows(run: MissionRun): string[][] {
-  const rows: string[][] = [
-    ['항목', '값'],
-    ['완료 시각', new Date(run.completedAt).toLocaleString('ko-KR')],
-    ['이동약자 유형', run.personaName],
-    ['핵심 병목', run.bottleneck],
-    ['소요 시간(초)', run.elapsedSeconds.toFixed(1)],
-    ['이동 거리(m)', run.walkedDistance.toFixed(1)],
-    ['통과 장애물', `${run.passedObstacles}/${run.enabledObstacles}`],
-    ['충돌 횟수', String(run.collisionCount)],
-    ['이동 차단', String(run.blockedAttemptCount)],
-    ['안전 판단', `${run.safeCount}/${run.eventCount}`],
-    ['재확인', String(run.recheckCount)],
-    ['평균 판단 시간(초)', run.averageDecisionTime.toFixed(1)],
-    ['최종 피로도', String(Math.round(run.fatigue))],
-    ['최대 불안감', String(Math.round(run.peakAnxiety))],
-    ['최저 방향 확신도', String(Math.round(run.minDirectionConfidence))],
-    ['최대 시간 압박', String(Math.round(run.peakTimePressure))],
-    ['가장 어려웠던 순간', run.reflection.hardMoment],
-    ['환경 장벽 원인', run.reflection.barrierCause],
-    ['환경 개선 제안', run.reflection.improvement],
-    [],
-    ['장애물 ID', '장애물', '상황 확인', '판단', '판단 유형', '판단 시간', '수행 시간', '충돌', '차단', '결과'],
-  ];
-  run.eventRecords.forEach((record) => rows.push([
-    record.obstacleId,
-    record.obstacleName,
-    record.sensingMethod,
-    record.decisionLabel,
-    record.decisionKind,
-    record.decisionSeconds.toFixed(1),
-    record.actionSeconds.toFixed(1),
-    String(record.collisions),
-    String(record.blockedAttempts),
-    record.outcome,
-  ]));
-  return rows;
-}
-
-function downloadCurrentRun(format: 'json' | 'csv'): void {
-  updateCurrentRunReflection();
-  const run = getCurrentRun();
-  if (!run) return;
-  const stamp = run.completedAt.slice(0, 19).replaceAll(':', '-');
-  if (format === 'json') {
-    downloadTextFile(`access-lab-${run.personaId}-${stamp}.json`, JSON.stringify(run, null, 2), 'application/json;charset=utf-8');
-    return;
-  }
-  const csv = '\ufeff' + runToCsvRows(run).map((row) => row.map(csvCell).join(',')).join('\r\n');
-  downloadTextFile(`access-lab-${run.personaId}-${stamp}.csv`, csv, 'text/csv;charset=utf-8');
-}
 
 function getMissionInterpretation(run: MissionRun): string {
   const retries = run.collisionCount + run.blockedAttemptCount;
@@ -676,7 +539,6 @@ function buildMissionRun(safeCount: number, recheckCount: number, averageDecisio
     minDirectionConfidence: experienceState.minDirectionConfidence,
     peakTimePressure: experienceState.peakTimePressure,
     eventRecords: eventRecords.map((record) => ({ ...record })),
-    reflection: { hardMoment: '', barrierCause: '', improvement: '' },
   };
 }
 
@@ -705,101 +567,6 @@ function renderMissionChecklist(): void {
   missionCheckSafe.dataset.state = safe > 0 ? 'active' : 'pending';
   missionCheckDestination.textContent = missionComplete ? '목적지 도착' : '목적지 도착 전';
   missionCheckDestination.dataset.state = missionComplete ? 'done' : 'pending';
-}
-
-function formatRunTime(run: MissionRun): string {
-  return new Date(run.completedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-const COMPARISON_METRICS: Array<{ label: string; value: (run: MissionRun) => string }> = [
-  { label: '핵심 병목', value: (run) => run.bottleneck },
-  { label: '소요 시간', value: (run) => `${Math.round(run.elapsedSeconds)}초` },
-  { label: '이동 거리', value: (run) => `${Math.round(run.walkedDistance)}m` },
-  { label: '충돌', value: (run) => `${run.collisionCount}회` },
-  { label: '이동 차단', value: (run) => `${run.blockedAttemptCount}회` },
-  { label: '안전 판단', value: (run) => `${run.safeCount}/${run.eventCount}` },
-  { label: '평균 판단 시간', value: (run) => `${run.averageDecisionTime.toFixed(1)}초` },
-  { label: '최종 피로도', value: (run) => `${Math.round(run.fatigue)}` },
-  { label: '최대 불안감', value: (run) => `${Math.round(run.peakAnxiety)}` },
-  { label: '최저 방향 확신', value: (run) => `${Math.round(run.minDirectionConfidence)}` },
-  { label: '최대 시간 압박', value: (run) => `${Math.round(run.peakTimePressure)}` },
-  { label: '지팡이 탐지', value: (run) => run.personaId === 'P-03' ? `${run.caneScanCount}회` : '해당 없음' },
-];
-
-function ensureComparisonSelection(runs: MissionRun[]): void {
-  const available = new Set(runs.map((run) => run.id));
-  selectedComparisonRunIds = new Set([...selectedComparisonRunIds].filter((id) => available.has(id)));
-  if (selectedComparisonRunIds.size >= 2 || runs.length === 0) return;
-  const preferred: MissionRun[] = [];
-  const current = runs.find((run) => run.id === currentRunId);
-  if (current) preferred.push(current);
-  for (const run of runs) {
-    if (!preferred.some((item) => item.id === run.id) && !preferred.some((item) => item.personaId === run.personaId)) preferred.push(run);
-    if (preferred.length >= Math.min(2, runs.length)) break;
-  }
-  for (const run of runs) {
-    if (!preferred.some((item) => item.id === run.id)) preferred.push(run);
-    if (preferred.length >= Math.min(2, runs.length)) break;
-  }
-  selectedComparisonRunIds = new Set(preferred.slice(0, 2).map((run) => run.id));
-}
-
-function renderComparison(): void {
-  const runs = getSavedRuns();
-  comparisonEmpty.hidden = runs.length > 0;
-  comparisonContent.hidden = runs.length === 0;
-  if (!runs.length) return;
-  ensureComparisonSelection(runs);
-  comparisonRunSelector.innerHTML = runs.map((run) => {
-    const checked = selectedComparisonRunIds.has(run.id);
-    const retries = run.collisionCount + run.blockedAttemptCount;
-    return `<label class="comparison-run-card ${checked ? 'is-selected' : ''}"><input type="checkbox" data-comparison-run="${run.id}" ${checked ? 'checked' : ''}/><span class="comparison-run-code">${run.personaId}</span><strong>${escapeHtml(run.personaName)}</strong><small>${formatRunTime(run)} · ${Math.round(run.elapsedSeconds)}초 · 재시도 ${retries}회</small></label>`;
-  }).join('');
-  comparisonRunSelector.querySelectorAll<HTMLInputElement>('[data-comparison-run]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const id = input.dataset.comparisonRun as string;
-      if (input.checked && selectedComparisonRunIds.size >= 4) {
-        input.checked = false;
-        return;
-      }
-      if (input.checked) selectedComparisonRunIds.add(id);
-      else selectedComparisonRunIds.delete(id);
-      renderComparison();
-    });
-  });
-  const selected = runs.filter((run) => selectedComparisonRunIds.has(run.id));
-  comparisonTableHead.innerHTML = `<tr><th scope="col">비교 항목</th>${selected.map((run) => `<th scope="col"><span>${run.personaId}</span>${escapeHtml(run.personaName)}</th>`).join('')}</tr>`;
-  comparisonTableBody.innerHTML = COMPARISON_METRICS.map((metric) => `<tr><th scope="row">${metric.label}</th>${selected.map((run) => `<td>${escapeHtml(metric.value(run))}</td>`).join('')}</tr>`).join('');
-  if (selected.length < 2) {
-    comparisonInsight.innerHTML = '<strong>두 개 이상의 기록을 선택하세요.</strong><p>서로 다른 이동 조건을 선택하면 같은 환경에서 어떤 차이가 생기는지 확인할 수 있습니다.</p>';
-  } else {
-    const times = selected.map((run) => run.elapsedSeconds);
-    const retries = selected.map((run) => run.collisionCount + run.blockedAttemptCount);
-    const burdens = selected.map((run) => Math.max(run.fatigue, run.peakAnxiety, run.peakTimePressure, 100 - run.minDirectionConfidence));
-    comparisonInsight.innerHTML = `<strong>비교 관찰</strong><p>선택한 기록의 이동 시간은 ${Math.round(Math.min(...times))}~${Math.round(Math.max(...times))}초, 충돌·차단은 ${Math.min(...retries)}~${Math.max(...retries)}회, 상태 부담 지표는 ${Math.round(Math.min(...burdens))}~${Math.round(Math.max(...burdens))} 범위였습니다. 같은 길에서도 통과 폭·단차·정보 연속성·반응 시간 조건이 달라지면 이동 결과가 달라집니다.</p>`;
-  }
-}
-
-function openComparison(): void {
-  controls.unlock();
-  renderComparison();
-  openModal('comparison-modal');
-}
-
-function closeComparison(): void {
-  closeModal('comparison-modal');
-  if (missionComplete) openModal('complete-modal');
-  else if (hasStarted) openModal('pause-modal');
-  else openModal('intro-modal');
-}
-
-function downloadComparisonCsv(): void {
-  const selected = getSavedRuns().filter((run) => selectedComparisonRunIds.has(run.id));
-  if (!selected.length) return;
-  const header = ['비교 항목', ...selected.map((run) => `${run.personaId} ${run.personaName}`)];
-  const rows = [header, ...COMPARISON_METRICS.map((metric) => [metric.label, ...selected.map(metric.value)])];
-  const csv = '\ufeff' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
-  downloadTextFile('access-lab-comparison.csv', csv, 'text/csv;charset=utf-8');
 }
 
 function clampState(value: number): number {
@@ -2092,7 +1859,6 @@ function resetMission(lockAfter = false): void {
   elapsedSeconds = 0;
   walkedDistance = 0;
   missionComplete = false;
-  currentRunId = null;
   hasStarted = true;
   lastTimestamp = performance.now();
   lastContext = '';
@@ -2297,8 +2063,6 @@ function completeMission(): void {
     ? eventRecords.reduce((sum, record) => sum + record.decisionSeconds, 0) / eventRecords.length
     : 0;
   const run = buildMissionRun(safeCount, recheckCount, averageDecisionTime);
-  saveMissionRun(run);
-
   resultTime.textContent = `${Math.max(1, Math.round(elapsedSeconds))}초`;
   resultDistance.textContent = `${Math.round(walkedDistance)}m`;
   resultObstacles.textContent = `${getPassedObstacleCount()} / ${getEnabledObstacleCount()}`;
@@ -2325,16 +2089,12 @@ function completeMission(): void {
   resultAnxiety.textContent = `${Math.round(experienceState.peakAnxiety)}`;
   resultConfidence.textContent = `${Math.round(experienceState.minDirectionConfidence)}`;
   resultPressure.textContent = `${Math.round(experienceState.peakTimePressure)}`;
-  resultCompletedAt.textContent = `${new Date(run.completedAt).toLocaleString('ko-KR')} 완료 · 브라우저에 자동 저장`;
+  resultCompletedAt.textContent = `${new Date(run.completedAt).toLocaleString('ko-KR')} 완료`;
   resultRouteStatus.textContent = '도착 완료';
   resultEventStatus.textContent = `${run.eventCount} / ${run.enabledObstacles}`;
   resultSafetyStatus.textContent = `${run.safeCount} / ${run.eventCount}`;
   resultRetryStatus.textContent = `${run.collisionCount + run.blockedAttemptCount}회`;
   resultInsight.innerHTML = `<strong>체험 해석</strong><p>${getMissionInterpretation(run)}</p>`;
-  reflectionHardMoment.value = '';
-  reflectionBarrierCause.value = '';
-  reflectionImprovement.value = '';
-  reflectionSaveStatus.textContent = '결과는 자동 저장되었습니다.';
   renderMissionChecklist();
   setTimeout(() => openModal('complete-modal'), 180);
 }
@@ -2503,22 +2263,7 @@ function bindEvents(): void {
     resetMission(true);
   });
   query<HTMLButtonElement>('#return-button').addEventListener('click', returnToIntro);
-  query<HTMLButtonElement>('#save-reflection-button').addEventListener('click', updateCurrentRunReflection);
-  query<HTMLButtonElement>('#compare-results-button').addEventListener('click', openComparison);
   query<HTMLButtonElement>('#change-persona-result-button').addEventListener('click', openPersonaSelection);
-  query<HTMLButtonElement>('#download-json-button').addEventListener('click', () => downloadCurrentRun('json'));
-  query<HTMLButtonElement>('#download-csv-button').addEventListener('click', () => downloadCurrentRun('csv'));
-  query<HTMLButtonElement>('#comparison-button').addEventListener('click', openComparison);
-  query<HTMLButtonElement>('#comparison-close-button').addEventListener('click', closeComparison);
-  query<HTMLButtonElement>('#download-comparison-button').addEventListener('click', downloadComparisonCsv);
-  query<HTMLButtonElement>('#clear-results-button').addEventListener('click', () => {
-    if (!window.confirm('이 브라우저에 저장된 체험 결과를 모두 지울까요?')) return;
-    writeSavedRuns([]);
-    selectedComparisonRunIds.clear();
-    currentRunId = null;
-    renderComparison();
-  });
-
 
   query<HTMLButtonElement>('#settings-button').addEventListener('click', () => {
     openModal('settings-modal');
@@ -2550,7 +2295,6 @@ function bindEvents(): void {
     closeModal('pause-modal');
     closeModal('persona-modal');
     closeModal('mission-modal');
-    closeModal('comparison-modal');
     closeModal('help-modal');
     closeModal('settings-modal');
   });
