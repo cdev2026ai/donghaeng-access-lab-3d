@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b2d5b" />
-    <meta name="description" content="동행 Access Lab 3D 이동약자 체험 효과와 상태 UI 적용 버전" />
-    <title>동행 Access Lab 3D — 체험 효과와 상태 UI</title>
+    <meta name="description" content="동행 Access Lab 3D 미션·결과·비교 화면 적용 버전" />
+    <title>동행 Access Lab 3D — 미션·결과·비교</title>
   </head>
   <body data-persona="P-00">
     <div id="app">
@@ -16,10 +16,11 @@
           <span class="brand-mark" aria-hidden="true">동행</span>
           <div>
             <strong>Access Lab 3D</strong>
-            <span>체험 효과·상태 UI · v0.5.2</span>
+            <span>미션·결과·비교 · v0.6</span>
           </div>
         </div>
         <div class="top-actions">
+          <button id="comparison-button" class="icon-button" type="button" aria-label="체험 결과 비교 열기">⇄</button>
           <button id="help-button" class="icon-button" type="button" aria-label="도움말 열기">?</button>
           <button id="settings-button" class="icon-button" type="button" aria-label="설정 열기">⚙</button>
         </div>
@@ -38,6 +39,11 @@
         </div>
         <div class="progress-track" aria-label="미션 진행률">
           <div id="mission-progress" class="progress-fill"></div>
+        </div>
+        <div class="mission-mini-checks" aria-label="미션 체크리스트">
+          <span id="mission-check-events" data-state="pending">이벤트 0/5</span>
+          <span id="mission-check-safe" data-state="pending">안전 판단 0회</span>
+          <span id="mission-check-destination" data-state="pending">목적지 도착 전</span>
         </div>
       </aside>
 
@@ -147,7 +153,7 @@
 
       <section id="intro-modal" class="modal-layer is-open" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <div class="modal intro-panel">
-          <div class="modal-kicker">동행 Access Lab 3D · v0.5.2-vision-stronger</div>
+          <div class="modal-kicker">동행 Access Lab 3D · v0.6-mission-result-compare</div>
           <h2 id="intro-title">장벽을 발견하고, 판단하고, 행동해 보세요.</h2>
           <p class="lead">장애물마다 접근 → 상황인지 → 판단 → 동작수행 → 결과가 진행되며, 이동 조건에 따라 피로·불안·방향 확신도·시간 압박이 변합니다.</p>
           <div class="notice-box">
@@ -212,6 +218,37 @@
         </div>
       </section>
 
+      <section id="mission-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="mission-brief-title">
+        <div class="modal mission-brief-panel">
+          <div class="modal-kicker">미션 브리핑</div>
+          <h2 id="mission-brief-title">학교 정문에서 버스정류장까지 이동하세요.</h2>
+          <p class="lead">선택한 이동 조건으로 다섯 장벽을 확인하고, 상황인지 → 판단 → 동작수행 과정을 완료한 뒤 목적지에 도착합니다.</p>
+          <div class="mission-profile-strip">
+            <div><span>체험 유형</span><strong id="mission-persona-name">비교 기준 보행자</strong></div>
+            <div><span>핵심 병목</span><strong id="mission-persona-bottleneck">비교 기준</strong></div>
+            <div><span>기본 속도</span><strong id="mission-persona-speed">100%</strong></div>
+          </div>
+          <div class="mission-route-map" aria-label="미션 경로">
+            <span class="is-start">학교 정문</span><i></i><span>보도</span><i></i><span>횡단보도</span><i></i><span class="is-finish">버스정류장</span>
+          </div>
+          <div class="mission-goal-grid">
+            <article><b>1</b><div><strong>장애물 확인</strong><p id="mission-enabled-count">활성 장애물 5개를 확인합니다.</p></div></article>
+            <article><b>2</b><div><strong>정보와 판단 기록</strong><p>각 장벽에서 상황을 확인하고 이동 방법을 선택합니다.</p></div></article>
+            <article><b>3</b><div><strong>직접 동작수행</strong><p>선택한 방법대로 이동하며 충돌·차단·상태 변화를 관찰합니다.</p></div></article>
+            <article><b>4</b><div><strong>결과 비교</strong><p>완료 후 다른 유형의 결과와 나란히 비교합니다.</p></div></article>
+          </div>
+          <div class="mission-observation-box">
+            <strong>이번 유형에서 관찰할 점</strong>
+            <p id="mission-observation-text"></p>
+          </div>
+          <div class="mission-brief-actions">
+            <button id="mission-back-button" class="secondary-button" type="button">유형 다시 선택</button>
+            <button id="mission-start-button" class="primary-button" type="button">미션 시작</button>
+          </div>
+          <p class="fine-print">결과는 이 브라우저에 최대 8회까지 저장되며, 개인정보는 수집하지 않습니다.</p>
+        </div>
+      </section>
+
       <section id="event-modal" class="modal-layer event-modal-layer" role="dialog" aria-modal="true" aria-labelledby="event-title">
         <div class="modal event-panel">
           <div class="event-modal-top">
@@ -246,6 +283,7 @@
           <p>계속하거나 유형을 바꾸어 같은 환경을 다시 비교할 수 있습니다.</p>
           <div class="button-stack">
             <button id="resume-button" class="primary-button" type="button">계속하기</button>
+            <button id="mission-review-button" class="secondary-button" type="button">미션 안내 다시 보기</button>
             <button id="change-persona-button" class="secondary-button" type="button">이동약자 유형 바꾸기</button>
             <button id="reset-button" class="secondary-button" type="button">현재 유형으로 처음부터</button>
             <button id="pause-settings-button" class="secondary-button" type="button">장애물·화면 설정</button>
@@ -254,15 +292,28 @@
       </section>
 
       <section id="complete-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="complete-title">
-        <div class="modal result-panel persona-result-panel">
-          <div class="result-badge" aria-hidden="true">✓</div>
-          <div class="modal-kicker">미션 완료</div>
-          <h2 id="complete-title">버스정류장에 도착했습니다.</h2>
+        <div class="modal mission-result-panel">
+          <div class="result-hero">
+            <div class="result-badge" aria-hidden="true">✓</div>
+            <div>
+              <div class="modal-kicker">체험 결과</div>
+              <h2 id="complete-title">버스정류장에 도착했습니다.</h2>
+              <p id="result-completed-at" class="result-completed-at"></p>
+            </div>
+          </div>
           <div class="result-profile">
             <span>체험 유형</span>
             <strong id="result-persona">비교 기준 보행자</strong>
             <em>핵심 병목: <b id="result-bottleneck">비교 기준</b></em>
           </div>
+          <div class="mission-achievement-grid" aria-label="미션 달성 상태">
+            <div><span>경로</span><strong id="result-route-status">도착 완료</strong></div>
+            <div><span>이벤트</span><strong id="result-event-status">0 / 5</strong></div>
+            <div><span>안전 판단</span><strong id="result-safety-status">0 / 5</strong></div>
+            <div><span>재시도 부담</span><strong id="result-retry-status">0회</strong></div>
+          </div>
+          <div id="result-insight" class="result-insight-box"></div>
+          <div class="result-section-heading"><strong>이동 기록</strong><span>같은 환경을 다른 이동 조건과 비교하기 위한 수치입니다.</span></div>
           <div class="result-grid result-grid-eight">
             <div><span>소요 시간</span><strong id="result-time">0초</strong></div>
             <div><span>이동 거리</span><strong id="result-distance">0m</strong></div>
@@ -285,18 +336,66 @@
             <div><span>최저 방향 확신</span><strong id="result-confidence">100</strong></div>
             <div><span>최대 시간 압박</span><strong id="result-pressure">0</strong></div>
           </div>
-          <div class="event-log-box">
-            <strong>장애물별 이벤트 기록</strong>
+          <details class="event-log-box" open>
+            <summary>장애물별 이벤트 기록</summary>
             <ol id="result-event-log" class="result-event-log"></ol>
-          </div>
+          </details>
           <div class="reflection-box persona-result-note">
             <strong>이 유형에서 관찰할 점</strong>
             <p id="result-persona-note"></p>
           </div>
-          <div class="button-stack">
-            <button id="replay-button" class="primary-button" type="button">같은 유형으로 다시 체험</button>
-            <button id="return-button" class="secondary-button" type="button">시작 화면으로</button>
+          <div class="reflection-form" aria-labelledby="reflection-title">
+            <div class="result-section-heading"><strong id="reflection-title">체험 성찰</strong><span>작성 내용은 현재 브라우저에만 저장됩니다.</span></div>
+            <label><span>가장 이동이 어려웠던 순간은 언제였나요?</span><textarea id="reflection-hard-moment" rows="3" placeholder="예: 높은 단차 앞에서 우회로를 바로 찾지 못했을 때"></textarea></label>
+            <label><span>어려움은 개인의 특성보다 어떤 환경 조건에서 커졌나요?</span><textarea id="reflection-barrier-cause" rows="3" placeholder="예: 보도 폭이 좁고 안내 정보가 끊긴 환경"></textarea></label>
+            <label><span>이 환경을 어떻게 바꾸면 더 안전하고 포용적일까요?</span><textarea id="reflection-improvement" rows="3" placeholder="예: 연속된 점자블록과 충분한 통과 폭 확보"></textarea></label>
+            <div class="reflection-save-row">
+              <button id="save-reflection-button" class="secondary-button" type="button">성찰 내용 저장</button>
+              <span id="reflection-save-status" aria-live="polite">결과는 자동 저장되었습니다.</span>
+            </div>
           </div>
+          <div class="result-primary-actions">
+            <button id="compare-results-button" class="primary-button" type="button">다른 체험 결과와 비교</button>
+            <button id="change-persona-result-button" class="secondary-button" type="button">다른 유형 체험</button>
+          </div>
+          <div class="result-secondary-actions">
+            <button id="download-json-button" class="secondary-button" type="button">JSON 저장</button>
+            <button id="download-csv-button" class="secondary-button" type="button">CSV 저장</button>
+            <button id="replay-button" class="secondary-button" type="button">같은 유형 다시 체험</button>
+            <button id="return-button" class="secondary-button" type="button">시작 화면</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="comparison-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="comparison-title">
+        <div class="modal comparison-panel">
+          <div class="comparison-head">
+            <div>
+              <div class="modal-kicker">교차 체험 비교</div>
+              <h2 id="comparison-title">같은 길, 다른 이동 경험</h2>
+              <p>2~4개의 체험 기록을 선택해 결과를 나란히 확인하세요. 이 비교는 사람의 능력을 평가하는 점수가 아니라 환경 장벽의 영향을 관찰하기 위한 자료입니다.</p>
+            </div>
+            <button id="comparison-close-button" class="comparison-close" type="button" aria-label="비교 화면 닫기">×</button>
+          </div>
+          <div id="comparison-empty" class="comparison-empty" hidden>
+            <strong>비교할 체험 기록이 아직 없습니다.</strong>
+            <p>미션을 한 번 이상 완료하면 결과가 이 브라우저에 저장됩니다.</p>
+          </div>
+          <div id="comparison-content">
+            <div class="comparison-toolbar">
+              <span>최근 기록 중 최대 4개 선택</span>
+              <div><button id="download-comparison-button" class="secondary-button small-button" type="button">비교 CSV</button><button id="clear-results-button" class="secondary-button small-button danger-button" type="button">기록 지우기</button></div>
+            </div>
+            <div id="comparison-run-selector" class="comparison-run-selector"></div>
+            <div id="comparison-insight" class="comparison-insight"></div>
+            <div class="comparison-table-wrap">
+              <table class="comparison-table">
+                <thead id="comparison-table-head"></thead>
+                <tbody id="comparison-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <p class="fine-print">최대 8개의 최근 완료 기록을 저장합니다. 브라우저 데이터를 삭제하면 기록도 함께 삭제됩니다.</p>
         </div>
       </section>
 
@@ -361,6 +460,7 @@
             <li><b>판단:</b> 1~3번 선택지에서 이동 방법을 고릅니다. 재확인을 선택하면 상황인지 단계로 돌아갑니다.</li>
             <li><b>동작수행:</b> 선택한 방법에 따라 직접 이동하고 장애물을 통과합니다.</li>
             <li><b>결과:</b> 선택, 충돌, 이동 차단, 소요 시간과 함께 피로·불안·방향 확신도·시간 압박이 기록됩니다.</li>
+            <li><b>비교:</b> 완료 기록을 최대 4개까지 선택해 유형별 결과를 나란히 확인할 수 있습니다.</li>
             <li><b>체험 효과:</b> 시각장애 모드는 주변부 시야와 정보 명료도, 고령 보행 모드는 피로 누적, 위험 선택과 충돌은 불안 상승으로 표현됩니다.</li>
           </ul>
           <p class="help-note">판단 선택지는 숫자 <kbd>1</kbd>·<kbd>2</kbd>·<kbd>3</kbd>으로도 고를 수 있습니다. 막혔을 때는 <kbd>S</kbd>로 뒤로 이동한 뒤 방향을 바꾸세요.</p>
