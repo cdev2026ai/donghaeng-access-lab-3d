@@ -4,19 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b2d5b" />
-    <meta name="description" content="동행 Access Lab 3D 기본 환경 MVP" />
-    <title>동행 Access Lab 3D — 기본 환경 MVP</title>
+    <meta name="description" content="동행 Access Lab 3D 장애물 5종 구현 버전" />
+    <title>동행 Access Lab 3D — 장애물 5종</title>
   </head>
   <body>
     <div id="app">
-      <canvas id="scene" aria-label="학교 앞 횡단보도 3D 체험 화면"></canvas>
+      <canvas id="scene" aria-label="학교 앞 이동 장벽 5종 3D 체험 화면"></canvas>
 
       <header class="top-bar">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">동행</span>
           <div>
             <strong>Access Lab 3D</strong>
-            <span>기본 환경 MVP · v0.1</span>
+            <span>장애물 5종 구현 · v0.2</span>
           </div>
         </div>
         <div class="top-actions">
@@ -27,7 +27,7 @@
 
       <aside class="mission-card" aria-live="polite">
         <div class="eyebrow">현재 미션</div>
-        <h1>학교 정문에서 버스정류장까지 이동하세요.</h1>
+        <h1>장애물 5종을 지나 버스정류장까지 이동하세요.</h1>
         <div class="mission-row">
           <span>현재 구간</span>
           <strong id="zone-label">학교 정문</strong>
@@ -41,13 +41,28 @@
         </div>
       </aside>
 
+      <aside class="obstacle-card" aria-live="polite">
+        <div class="obstacle-card-header">
+          <div>
+            <div class="eyebrow">장애물 진행</div>
+            <strong id="obstacle-count-label">0 / 5</strong>
+          </div>
+          <div class="current-obstacle">
+            <span>현재</span>
+            <strong id="current-obstacle-label">없음</strong>
+          </div>
+        </div>
+        <ol id="obstacle-status-list" class="obstacle-status-list"></ol>
+      </aside>
+
       <aside class="status-card" aria-live="polite">
-        <div class="status-title">기본 보행 환경</div>
+        <div class="status-title">기준 보행 · 장애물 검증</div>
         <div class="status-grid">
           <div><span>속도</span><strong id="speed-label">0.0 m/s</strong></div>
           <div><span>이동 거리</span><strong id="walked-label">0 m</strong></div>
           <div><span>보행 신호</span><strong id="signal-label" class="signal signal-go">진행</strong></div>
           <div><span>남은 시간</span><strong id="signal-time-label">20초</strong></div>
+          <div class="wide-status"><span>장애물 충돌</span><strong id="collision-label">0회</strong></div>
         </div>
       </aside>
 
@@ -67,12 +82,19 @@
 
       <section id="intro-modal" class="modal-layer is-open" role="dialog" aria-modal="true" aria-labelledby="intro-title">
         <div class="modal intro-panel">
-          <div class="modal-kicker">동행 Access Lab 3D</div>
-          <h2 id="intro-title">같은 길, 다른 이동 경험</h2>
-          <p class="lead">학교 정문에서 횡단보도를 건너 버스정류장까지 이동해 보세요.</p>
+          <div class="modal-kicker">동행 Access Lab 3D · v0.2-obstacles</div>
+          <h2 id="intro-title">이동 장벽 5종 체험</h2>
+          <p class="lead">학교 정문에서 버스정류장까지 이동하며 서로 다른 장애물의 물리 반응을 확인하세요.</p>
           <div class="notice-box">
-            <strong>기본 3D MVP 범위</strong>
-            <p>도로·보도·횡단보도·신호등·학교·버스정류장과 1인칭 이동을 구현한 기본 환경입니다. 이동약자별 장애물과 체험 효과는 다음 개발 단계에서 추가됩니다.</p>
+            <strong>이번 버전의 구현 범위</strong>
+            <p>높은 단차, 가파른 경사로, 불법 주차 차량과 좁은 통로, 파손 점자블록, 볼라드·입간판을 구현했습니다. 페르소나별 차이는 다음 단계에서 적용합니다.</p>
+          </div>
+          <div class="obstacle-summary-grid" aria-label="장애물 5종">
+            <div><b>O-01</b><span>높은 단차</span></div>
+            <div><b>O-02</b><span>가파른 경사</span></div>
+            <div><b>O-03</b><span>불법 주차</span></div>
+            <div><b>O-04</b><span>파손 점자블록</span></div>
+            <div><b>O-05</b><span>볼라드·입간판</span></div>
           </div>
           <div class="key-grid">
             <div><span class="key-icon">WASD</span><strong>앞·뒤·좌·우 이동</strong></div>
@@ -80,8 +102,8 @@
             <div><span class="key-icon">ESC</span><strong>일시정지·커서 해제</strong></div>
             <div><span class="key-icon">R</span><strong>출발 위치로 재설정</strong></div>
           </div>
-          <button id="start-button" class="primary-button" type="button">체험 시작</button>
-          <p class="fine-print">키보드와 마우스가 연결된 Chrome 또는 Edge 사용을 권장합니다.</p>
+          <button id="start-button" class="primary-button" type="button">장애물 체험 시작</button>
+          <p class="fine-print">이 버전은 장애물의 위치·충돌·감속·우회 동작을 검증하기 위한 기준 보행 모드입니다.</p>
         </div>
       </section>
 
@@ -89,11 +111,11 @@
         <div class="modal compact-panel">
           <div class="modal-kicker">일시정지</div>
           <h2 id="pause-title">체험이 잠시 멈췄습니다.</h2>
-          <p>계속하려면 아래 버튼을 누르세요.</p>
+          <p>계속하거나 출발 위치로 돌아갈 수 있습니다.</p>
           <div class="button-stack">
             <button id="resume-button" class="primary-button" type="button">계속하기</button>
             <button id="reset-button" class="secondary-button" type="button">출발 위치로 돌아가기</button>
-            <button id="pause-settings-button" class="secondary-button" type="button">화면 설정</button>
+            <button id="pause-settings-button" class="secondary-button" type="button">장애물·화면 설정</button>
           </div>
         </div>
       </section>
@@ -103,13 +125,17 @@
           <div class="result-badge" aria-hidden="true">✓</div>
           <div class="modal-kicker">미션 완료</div>
           <h2 id="complete-title">버스정류장에 도착했습니다.</h2>
-          <div class="result-grid">
+          <div class="result-grid result-grid-six">
             <div><span>소요 시간</span><strong id="result-time">0초</strong></div>
             <div><span>이동 거리</span><strong id="result-distance">0m</strong></div>
+            <div><span>통과 장애물</span><strong id="result-obstacles">0 / 5</strong></div>
+            <div><span>충돌 횟수</span><strong id="result-collisions">0회</strong></div>
+            <div><span>이동 차단</span><strong id="result-blocked">0회</strong></div>
+            <div><span>거친 노면</span><strong id="result-rough">0초</strong></div>
           </div>
           <div class="reflection-box">
             <strong>다음 단계에서 확인할 질문</strong>
-            <p>이 길에 단차, 좁은 통로, 파손 점자블록이 추가되면 이동약자 유형별 결과는 어떻게 달라질까요?</p>
+            <p>같은 장애물도 휠체어 사용자, 고령 보행자, 시각장애인에게 서로 다른 결과를 만들려면 어떤 규칙이 추가되어야 할까요?</p>
           </div>
           <div class="button-stack">
             <button id="replay-button" class="primary-button" type="button">다시 체험하기</button>
@@ -120,16 +146,28 @@
 
       <section id="settings-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="modal settings-panel">
-          <div class="modal-kicker">화면 설정</div>
-          <h2 id="settings-title">수업 환경에 맞게 조정하세요.</h2>
+          <div class="modal-kicker">장애물·화면 설정</div>
+          <h2 id="settings-title">수업 환경과 검수 목적에 맞게 조정하세요.</h2>
           <label class="setting-row">
-            <span><strong>저사양 모드</strong><small>그림자와 장식 요소를 줄입니다.</small></span>
+            <span><strong>저사양 모드</strong><small>그림자와 장식 효과를 줄입니다.</small></span>
             <input id="low-spec-toggle" type="checkbox" />
           </label>
           <label class="setting-row">
-            <span><strong>상황 안내</strong><small>현재 구간에 맞는 안내 문구를 표시합니다.</small></span>
+            <span><strong>상황 안내</strong><small>상황인지·판단·수행 안내 문구를 표시합니다.</small></span>
             <input id="guide-toggle" type="checkbox" checked />
           </label>
+          <label class="setting-row">
+            <span><strong>화면 흔들림</strong><small>파손 점자블록 구간의 미세 흔들림을 사용합니다.</small></span>
+            <input id="motion-toggle" type="checkbox" checked />
+          </label>
+          <fieldset class="obstacle-setting-group">
+            <legend>장애물 표시</legend>
+            <label><span><b>O-01</b> 높은 단차</span><input type="checkbox" data-obstacle-toggle="O-01" checked /></label>
+            <label><span><b>O-02</b> 가파른 경사</span><input type="checkbox" data-obstacle-toggle="O-02" checked /></label>
+            <label><span><b>O-03</b> 불법 주차 차량</span><input type="checkbox" data-obstacle-toggle="O-03" checked /></label>
+            <label><span><b>O-04</b> 파손 점자블록</span><input type="checkbox" data-obstacle-toggle="O-04" checked /></label>
+            <label><span><b>O-05</b> 볼라드·입간판</span><input type="checkbox" data-obstacle-toggle="O-05" checked /></label>
+          </fieldset>
           <div class="button-stack">
             <button id="settings-close-button" class="primary-button" type="button">설정 적용</button>
           </div>
@@ -137,15 +175,17 @@
       </section>
 
       <section id="help-modal" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="help-title">
-        <div class="modal compact-panel">
+        <div class="modal compact-panel help-panel">
           <div class="modal-kicker">도움말</div>
-          <h2 id="help-title">기본 조작법</h2>
+          <h2 id="help-title">장애물 통과 방법</h2>
           <ul class="help-list">
-            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 방향키로 이동합니다.</li>
-            <li>마우스를 움직여 주변을 살펴봅니다.</li>
-            <li><kbd>ESC</kbd>로 일시정지하고 마우스 커서를 다시 사용할 수 있습니다.</li>
-            <li><kbd>R</kbd>을 누르면 학교 정문으로 돌아갑니다.</li>
+            <li><b>O-01:</b> 정면 턱은 막혀 있습니다. 오른쪽 경사 통로로 이동합니다.</li>
+            <li><b>O-02:</b> 경사 구간에서는 속도가 자동으로 감소합니다.</li>
+            <li><b>O-03:</b> 차량 오른쪽의 좁은 통로를 천천히 통과합니다.</li>
+            <li><b>O-04:</b> 거친 구간에서는 속도와 화면 흔들림이 달라집니다.</li>
+            <li><b>O-05:</b> 볼라드 사이에 시점을 맞추고 입간판을 피합니다.</li>
           </ul>
+          <p class="help-note">충돌하여 움직이지 않을 때는 <kbd>S</kbd>로 뒤로 이동한 뒤 방향을 바꾸세요.</p>
           <button id="help-close-button" class="primary-button" type="button">확인</button>
         </div>
       </section>
