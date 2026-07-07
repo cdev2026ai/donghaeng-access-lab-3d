@@ -11,6 +11,8 @@ type PersonaMessagePhase = 'approach' | 'decision' | 'action' | 'result';
 type CurbMode = 'pass' | 'slow' | 'blocked';
 type EventPhase = 'approach' | 'sensing' | 'decision' | 'action' | 'result';
 type DecisionKind = 'safe' | 'risky' | 'recheck';
+type EffectStrength = 'off' | 'low' | 'medium' | 'high';
+type StateGrade = 'stable' | 'attention' | 'burden' | 'high';
 
 type EventChoice = {
   id: string;
@@ -48,6 +50,17 @@ type EventRecord = {
   blockedAttempts: number;
   rechecks: number;
   outcome: string;
+};
+
+type ExperienceState = {
+  fatigue: number;
+  anxiety: number;
+  directionConfidence: number;
+  timePressure: number;
+  visionClarity: number;
+  peakAnxiety: number;
+  peakTimePressure: number;
+  minDirectionConfidence: number;
 };
 
 type BoxCollider = {
@@ -108,6 +121,10 @@ type PersonaObstacleMessage = Record<PersonaMessagePhase, string>;
 
 const BASE_MAX_SPEED = 3.15;
 const POINTER_SPEED = 0.72;
+const STATE_MIN = 0;
+const STATE_MAX = 100;
+const VISION_STRENGTH_MULTIPLIER: Record<EffectStrength, number> = { off: 0, low: 0.50, medium: 0.72, high: 0.88 };
+const VISION_BASE_MASK: Record<EffectStrength, number> = { off: 0, low: 0.21, medium: 0.37, high: 0.50 };
 
 const PERSONAS: Record<PersonaId, PersonaDefinition> = {
   'P-00': {
@@ -346,6 +363,23 @@ let inputReadyAt = 0;
 let hadMovementInput = false;
 let activeEvent: ActiveEvent | null = null;
 let eventRecords: EventRecord[] = [];
+let experienceState: ExperienceState = {
+  fatigue: 0,
+  anxiety: 3,
+  directionConfidence: 95,
+  timePressure: 0,
+  visionClarity: 100,
+  peakAnxiety: 3,
+  peakTimePressure: 0,
+  minDirectionConfidence: 95,
+};
+let experienceEffectsEnabled = true;
+let visionEffectStrength: EffectStrength = 'medium';
+let highContrastEnabled = false;
+let caneVisibleEnabled = true;
+let caneAnimationStartedAt = -1;
+let caneAnimationContact = false;
+let caneGroup: THREE.Group | null = null;
 
 const query = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
@@ -404,7 +438,231 @@ const resultSafeDecisions = query<HTMLElement>('#result-safe-decisions');
 const resultRechecks = query<HTMLElement>('#result-rechecks');
 const resultDecisionTime = query<HTMLElement>('#result-decision-time');
 const resultEventLog = query<HTMLOListElement>('#result-event-log');
+const experienceStateCard = query<HTMLElement>('#experience-state-card');
+const stateGradeLabel = query<HTMLElement>('#state-grade-label');
+const stateContextLabel = query<HTMLElement>('#state-context-label');
+const fatigueValue = query<HTMLElement>('#fatigue-value');
+const fatigueFill = query<HTMLElement>('#fatigue-fill');
+const anxietyValue = query<HTMLElement>('#anxiety-value');
+const anxietyFill = query<HTMLElement>('#anxiety-fill');
+const directionConfidenceValue = query<HTMLElement>('#direction-confidence-value');
+const directionConfidenceFill = query<HTMLElement>('#direction-confidence-fill');
+const timePressureValue = query<HTMLElement>('#time-pressure-value');
+const timePressureFill = query<HTMLElement>('#time-pressure-fill');
+const activeEffectList = query<HTMLElement>('#active-effect-list');
+const experienceVisualLayer = query<HTMLElement>('#experience-visual-layer');
+const experienceEffectsToggle = query<HTMLInputElement>('#experience-effects-toggle');
+const visionStrengthSelect = query<HTMLSelectElement>('#vision-strength-select');
+const contrastToggle = query<HTMLInputElement>('#contrast-toggle');
+const caneVisibleToggle = query<HTMLInputElement>('#cane-visible-toggle');
+const resultFatigue = query<HTMLElement>('#result-fatigue');
+const resultAnxiety = query<HTMLElement>('#result-anxiety');
+const resultConfidence = query<HTMLElement>('#result-confidence');
+const resultPressure = query<HTMLElement>('#result-pressure');
 
+
+function clampState(value: number): number {
+  return THREE.MathUtils.clamp(value, STATE_MIN, STATE_MAX);
+}
+
+function adjustExperienceState(changes: Partial<Pick<ExperienceState, 'fatigue' | 'anxiety' | 'directionConfidence' | 'timePressure' | 'visionClarity'>>): void {
+  if (changes.fatigue !== undefined) experienceState.fatigue = clampState(experienceState.fatigue + changes.fatigue);
+  if (changes.anxiety !== undefined) experienceState.anxiety = clampState(experienceState.anxiety + changes.anxiety);
+  if (changes.directionConfidence !== undefined) experienceState.directionConfidence = clampState(experienceState.directionConfidence + changes.directionConfidence);
+  if (changes.timePressure !== undefined) experienceState.timePressure = clampState(experienceState.timePressure + changes.timePressure);
+  if (changes.visionClarity !== undefined) experienceState.visionClarity = clampState(experienceState.visionClarity + changes.visionClarity);
+  experienceState.peakAnxiety = Math.max(experienceState.peakAnxiety, experienceState.anxiety);
+  experienceState.peakTimePressure = Math.max(experienceState.peakTimePressure, experienceState.timePressure);
+  experienceState.minDirectionConfidence = Math.min(experienceState.minDirectionConfidence, experienceState.directionConfidence);
+}
+
+function getInitialExperienceState(personaId: PersonaId): ExperienceState {
+  const initial: Record<PersonaId, Pick<ExperienceState, 'fatigue' | 'anxiety' | 'directionConfidence' | 'visionClarity'>> = {
+    'P-00': { fatigue: 0, anxiety: 3, directionConfidence: 96, visionClarity: 100 },
+    'P-01': { fatigue: 5, anxiety: 8, directionConfidence: 90, visionClarity: 100 },
+    'P-02': { fatigue: 10, anxiety: 10, directionConfidence: 88, visionClarity: 96 },
+    'P-03': { fatigue: 5, anxiety: 12, directionConfidence: 72, visionClarity: 48 },
+  };
+  const base = initial[personaId];
+  return {
+    ...base,
+    timePressure: 0,
+    peakAnxiety: base.anxiety,
+    peakTimePressure: 0,
+    minDirectionConfidence: base.directionConfidence,
+  };
+}
+
+function getStateGrade(): { key: StateGrade; label: string } {
+  const burden = Math.max(experienceState.fatigue, experienceState.anxiety, experienceState.timePressure, 100 - experienceState.directionConfidence);
+  if (burden >= 75) return { key: 'high', label: '부담 높음' };
+  if (burden >= 50) return { key: 'burden', label: '부담 증가' };
+  if (burden >= 25) return { key: 'attention', label: '주의' };
+  return { key: 'stable', label: '안정' };
+}
+
+function getCurrentEffectContext(): string {
+  const environment = getEnvironmentEffects(camera.position);
+  if (environment.activeObstacleId === 'O-02') return '경사 구간';
+  if (environment.activeObstacleId === 'O-03') return '좁은 통로';
+  if (environment.activeObstacleId === 'O-04') return '정보 단절·거친 노면';
+  if (environment.activeObstacleId === 'O-05') return '시설물 밀집';
+  if (camera.position.z >= -5.8 && camera.position.z <= 6) return '횡단보도';
+  return activeEvent ? EVENT_PHASE_LABEL[activeEvent.phase] : '기본 상태';
+}
+
+function updateExperienceState(delta: number, speed: number): void {
+  if (!hasStarted || missionComplete) return;
+  const environment = getEnvironmentEffects(camera.position);
+  const moving = speed > 0.08;
+  const personaFatigueRate: Record<PersonaId, number> = { 'P-00': 0.55, 'P-01': 1.25, 'P-02': 1.75, 'P-03': 1.05 };
+  const movementLoad = moving ? (0.035 + Math.min(speed / BASE_MAX_SPEED, 1) * 0.055) * personaFatigueRate[currentPersona.id] : -0.035;
+  const terrainLoad = environment.activeObstacleId === 'O-02' ? 0.12 : environment.rough ? 0.09 : 0;
+  adjustExperienceState({ fatigue: (movementLoad + terrainLoad) * delta * 10 });
+
+  const anxietyRecovery = activeEvent?.phase === 'action' ? -0.01 : -0.045;
+  adjustExperienceState({ anxiety: anxietyRecovery * delta * 10 });
+
+  let targetPressure = 0;
+  if (camera.position.z >= -5.8 && camera.position.z <= 6) {
+    if (currentSignal === 'go') targetPressure = clampState((12 - signalTimeLeft) * 8.5);
+    else if (currentSignal === 'wait') targetPressure = 42;
+    else targetPressure = 18;
+  }
+  experienceState.timePressure = THREE.MathUtils.damp(experienceState.timePressure, targetPressure, targetPressure > experienceState.timePressure ? 3.2 : 1.4, delta);
+
+  if (currentPersona.id === 'P-03') {
+    let targetConfidence = 78;
+    let targetClarity = 48;
+    if (environment.activeObstacleId === 'O-04') {
+      targetConfidence = 38;
+      targetClarity = 22;
+    } else if (environment.activeObstacleId === 'O-03' || environment.activeObstacleId === 'O-05') {
+      targetConfidence = 54;
+      targetClarity = 34;
+    }
+    experienceState.directionConfidence = THREE.MathUtils.damp(experienceState.directionConfidence, targetConfidence, 0.7, delta);
+    experienceState.visionClarity = THREE.MathUtils.damp(experienceState.visionClarity, targetClarity, 1.2, delta);
+  } else {
+    experienceState.directionConfidence = THREE.MathUtils.damp(experienceState.directionConfidence, 94, 0.35, delta);
+    experienceState.visionClarity = THREE.MathUtils.damp(experienceState.visionClarity, 100, 1.1, delta);
+  }
+
+  experienceState.peakAnxiety = Math.max(experienceState.peakAnxiety, experienceState.anxiety);
+  experienceState.peakTimePressure = Math.max(experienceState.peakTimePressure, experienceState.timePressure);
+  experienceState.minDirectionConfidence = Math.min(experienceState.minDirectionConfidence, experienceState.directionConfidence);
+}
+
+function setMeter(fill: HTMLElement, valueElement: HTMLElement, value: number, inverse = false): void {
+  const rounded = Math.round(value);
+  valueElement.textContent = String(rounded);
+  fill.style.width = `${rounded}%`;
+  fill.dataset.level = inverse
+    ? rounded < 35 ? 'high' : rounded < 60 ? 'burden' : rounded < 80 ? 'attention' : 'stable'
+    : rounded >= 75 ? 'high' : rounded >= 50 ? 'burden' : rounded >= 25 ? 'attention' : 'stable';
+}
+
+function updateExperienceUI(): void {
+  const grade = getStateGrade();
+  experienceStateCard.dataset.grade = grade.key;
+  stateGradeLabel.textContent = grade.label;
+  stateContextLabel.textContent = getCurrentEffectContext();
+  setMeter(fatigueFill, fatigueValue, experienceState.fatigue);
+  setMeter(anxietyFill, anxietyValue, experienceState.anxiety);
+  setMeter(directionConfidenceFill, directionConfidenceValue, experienceState.directionConfidence, true);
+  setMeter(timePressureFill, timePressureValue, experienceState.timePressure);
+
+  const environment = getEnvironmentEffects(camera.position);
+  const effects: string[] = [];
+  if (environment.speedMultiplier < 0.9) effects.push('이동 감속');
+  if (environment.activeObstacleId === 'O-02') effects.push('경사 부담');
+  if (environment.rough) effects.push('노면 진동');
+  if (currentPersona.id === 'P-03' && visionEffectStrength !== 'off') effects.push('주변부 시야 제한');
+  if (currentPersona.id === 'P-03' && environment.activeObstacleId === 'O-04') effects.push('방향 정보 단절');
+  if (experienceState.timePressure >= 35) effects.push('시간 압박');
+  if (experienceState.anxiety >= 45) effects.push('불안 상승');
+  if (experienceState.fatigue >= 45) effects.push('피로 누적');
+  activeEffectList.innerHTML = effects.length ? effects.map((effect) => `<span>${effect}</span>`).join('') : '<span>적용 효과 없음</span>';
+
+  const visionActive = experienceEffectsEnabled && currentPersona.id === 'P-03' && visionEffectStrength !== 'off';
+  const visionMultiplier = visionActive ? VISION_STRENGTH_MULTIPLIER[visionEffectStrength] : 0;
+  const dynamicVisionBurden = ((100 - experienceState.visionClarity) / 100) * visionMultiplier;
+  const visionBurden = visionActive ? THREE.MathUtils.clamp(VISION_BASE_MASK[visionEffectStrength] + dynamicVisionBurden, 0, 0.94) : 0;
+  const visionCenterRadius = 34 - visionBurden * 21;
+  const visionMidRadius = 60 - visionBurden * 13;
+  const sceneBlur = visionBurden * (visionEffectStrength === 'high' ? 2.85 : 2.05);
+  const sceneSaturation = Math.max(0.40, 1 - visionBurden * 0.66);
+  const sceneBrightness = Math.max(0.66, 1 - visionBurden * 0.26);
+  const fatigueBurden = experienceEffectsEnabled ? experienceState.fatigue / 100 : 0;
+  const anxietyBurden = experienceEffectsEnabled ? experienceState.anxiety / 100 : 0;
+  document.body.classList.toggle('vision-effect-active', visionActive);
+  document.body.style.setProperty('--scene-vision-blur', `${sceneBlur.toFixed(2)}px`);
+  document.body.style.setProperty('--scene-vision-saturation', sceneSaturation.toFixed(3));
+  document.body.style.setProperty('--scene-vision-brightness', sceneBrightness.toFixed(3));
+  experienceVisualLayer.style.setProperty('--vision-opacity', visionBurden.toFixed(3));
+  experienceVisualLayer.style.setProperty('--vision-blur', `${(visionBurden * 5.2).toFixed(2)}px`);
+  experienceVisualLayer.style.setProperty('--vision-center-radius', `${visionCenterRadius.toFixed(1)}%`);
+  experienceVisualLayer.style.setProperty('--vision-mid-radius', `${visionMidRadius.toFixed(1)}%`);
+  experienceVisualLayer.style.setProperty('--vision-haze-opacity', (visionBurden * 0.42).toFixed(3));
+  experienceVisualLayer.style.setProperty('--fatigue-opacity', (fatigueBurden * 0.42).toFixed(3));
+  experienceVisualLayer.style.setProperty('--anxiety-opacity', (anxietyBurden * 0.58).toFixed(3));
+  experienceVisualLayer.style.setProperty('--pulse-speed', `${Math.max(0.7, 2.4 - anxietyBurden * 1.5).toFixed(2)}s`);
+  renderer.toneMappingExposure = highContrastEnabled ? 1.14 : 1.05 - fatigueBurden * 0.1;
+}
+
+function createVisibleCane(): void {
+  const group = new THREE.Group();
+  group.name = 'visible-cane';
+  const shaftMaterial = new THREE.MeshStandardMaterial({ color: 0xf8fbff, roughness: 0.4, metalness: 0.08 });
+  const gripMaterial = new THREE.MeshStandardMaterial({ color: 0x263747, roughness: 0.8 });
+  const tipMaterial = new THREE.MeshStandardMaterial({ color: 0xd94b4b, roughness: 0.55 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 1.05, 12), shaftMaterial);
+  shaft.position.y = -0.52;
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.18, 12), gripMaterial);
+  grip.position.y = 0.095;
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.015, 0.16, 12), tipMaterial);
+  tip.position.y = -1.125;
+  group.add(shaft, grip, tip);
+  group.position.set(0.31, -0.20, -0.58);
+  group.rotation.set(-0.78, 0.05, -0.28);
+  group.visible = false;
+  camera.add(group);
+  caneGroup = group;
+}
+
+function triggerCaneAnimation(contact: boolean): void {
+  caneAnimationStartedAt = performance.now();
+  caneAnimationContact = contact;
+}
+
+function updateVisibleCane(now: number): void {
+  if (!caneGroup) return;
+  caneGroup.visible = currentPersona.id === 'P-03' && caneVisibleEnabled;
+  if (!caneGroup.visible) return;
+  let sweep = Math.sin(now * 0.0017) * 0.07;
+  let dip = 0;
+  if (caneAnimationStartedAt >= 0) {
+    const progress = (now - caneAnimationStartedAt) / 620;
+    if (progress <= 1) {
+      sweep += Math.sin(progress * Math.PI * 2) * 0.34;
+      dip = Math.sin(progress * Math.PI) * (caneAnimationContact ? 0.16 : 0.09);
+    } else {
+      caneAnimationStartedAt = -1;
+    }
+  }
+  caneGroup.rotation.y = sweep;
+  caneGroup.rotation.x = -0.78 - dip;
+}
+
+function applyExperienceSettings(): void {
+  experienceEffectsEnabled = experienceEffectsToggle.checked;
+  visionEffectStrength = visionStrengthSelect.value as EffectStrength;
+  highContrastEnabled = contrastToggle.checked;
+  caneVisibleEnabled = caneVisibleToggle.checked;
+  document.body.classList.toggle('experience-effects-off', !experienceEffectsEnabled);
+  document.body.classList.toggle('high-contrast', highContrastEnabled);
+  updateExperienceUI();
+}
 
 const EVENT_PHASE_ORDER: EventPhase[] = ['approach', 'sensing', 'decision', 'action', 'result'];
 const EVENT_PHASE_LABEL: Record<EventPhase, string> = {
@@ -518,6 +776,7 @@ function beginObstacleEvent(obstacle: ObstacleDefinition): void {
   };
   obstacle.encountered = true;
   obstacle.state = 'approach';
+  adjustExperienceState({ anxiety: 2.5, directionConfidence: currentPersona.id === 'P-03' ? -3 : -1 });
   currentObstacleId = obstacle.id;
   setContext('접근', getPersonaMessage(obstacle, 'approach'));
   openModal('event-modal');
@@ -539,7 +798,13 @@ function performEventSensing(): void {
       : currentPersona.id === 'P-02'
         ? '근거리 확인·균형 점검'
         : '시각·공간 정보 확인';
-  if (currentPersona.id === 'P-03') caneScanCount += 1;
+  if (currentPersona.id === 'P-03') {
+    caneScanCount += 1;
+    triggerCaneAnimation(true);
+    adjustExperienceState({ anxiety: -3, directionConfidence: 9, visionClarity: 4 });
+  } else {
+    adjustExperienceState({ anxiety: -1.5, directionConfidence: 3 });
+  }
   renderEventModal();
   renderEventFlow();
 }
@@ -565,6 +830,7 @@ function recheckEventSituation(): void {
   activeEvent.sensingComplete = false;
   activeEvent.sensingMethod = '';
   activeEvent.selectedChoice = null;
+  adjustExperienceState({ anxiety: -1, directionConfidence: 4 });
   setEventPhase('sensing');
 }
 
@@ -577,6 +843,8 @@ function applyEventDecision(): void {
     recheckEventSituation();
     return;
   }
+  if (choice.kind === 'safe') adjustExperienceState({ anxiety: -3, directionConfidence: 4 });
+  if (choice.kind === 'risky') adjustExperienceState({ anxiety: 10, directionConfidence: -7, fatigue: 1.5 });
   activeEvent.decisionAt = performance.now();
   activeEvent.actionStartedAt = activeEvent.decisionAt;
   activeEvent.phase = 'action';
@@ -614,6 +882,11 @@ function completeObstacleEvent(obstacle: ObstacleDefinition): void {
   };
   const record: EventRecord = { ...partial, outcome: getEventOutcome(partial) };
   eventRecords.push(record);
+  if (record.decisionKind === 'safe' && record.collisions === 0 && record.blockedAttempts === 0) {
+    adjustExperienceState({ anxiety: -5, directionConfidence: 6 });
+  } else if (record.collisions > 0 || record.blockedAttempts > 0) {
+    adjustExperienceState({ anxiety: 5, directionConfidence: -4 });
+  }
   obstacle.passed = true;
   obstacle.encountered = true;
   obstacle.state = 'passed';
@@ -808,7 +1081,9 @@ function applyPersona(id: PersonaId): void {
         ? `지팡이 탐지 ${currentPersona.caneRange.toFixed(1)}m · F 키 사용`
         : '비교 기준 프로필';
   caneHint.hidden = currentPersona.id !== 'P-03';
+  if (caneGroup) caneGroup.visible = currentPersona.id === 'P-03' && caneVisibleEnabled;
   renderPersonaSelection();
+  updateExperienceUI();
 }
 
 function openPersonaSelection(): void {
@@ -835,6 +1110,9 @@ function performCaneScan(): void {
   });
 
   caneScanCount += 1;
+  const hasContact = Boolean(nearest && nearestDistance <= currentPersona.caneRange);
+  triggerCaneAnimation(hasContact);
+  adjustExperienceState({ anxiety: hasContact ? -2 : -0.5, directionConfidence: hasContact ? 7 : 3, visionClarity: hasContact ? 3 : 1 });
   if (nearest && nearestDistance <= currentPersona.caneRange) {
     const detected = nearest as BoxCollider;
     const obstacle = detected.obstacleId ? obstacles.get(detected.obstacleId) : undefined;
@@ -1410,10 +1688,13 @@ function setPlayerHeight(time: number): void {
   const rampHeight = getRampHeight(camera.position.x, camera.position.z);
   const { rough } = getEnvironmentEffects(camera.position);
   const personaShakeScale = currentPersona.id === 'P-02' ? 0.75 : currentPersona.id === 'P-03' ? 0.45 : currentPersona.id === 'P-01' ? 0.85 : 0.6;
-  const shake = rough && motionEnabled && !document.body.classList.contains('low-spec')
+  const roughShake = rough && motionEnabled && !document.body.classList.contains('low-spec')
     ? (Math.sin(time * 42) * 0.018 + Math.sin(time * 23) * 0.009) * personaShakeScale
     : 0;
-  camera.position.y = currentPersona.cameraHeight + rampHeight + shake;
+  const anxietyShake = experienceEffectsEnabled && motionEnabled && experienceState.anxiety >= 65 && !document.body.classList.contains('low-spec')
+    ? Math.sin(time * 16) * ((experienceState.anxiety - 65) / 35) * 0.008
+    : 0;
+  camera.position.y = currentPersona.cameraHeight + rampHeight + roughShake + anxietyShake;
 }
 
 function registerCollision(collider: BoxCollider): void {
@@ -1425,6 +1706,7 @@ function registerCollision(collider: BoxCollider): void {
 
   collisionCount += 1;
   blockedAttemptCount += 1;
+  adjustExperienceState({ anxiety: 12, directionConfidence: -7, fatigue: 2 });
   collisionLabel.textContent = `${collisionCount}회`;
   const obstacle = obstacles.get(collider.obstacleId);
   if (obstacle) {
@@ -1453,6 +1735,7 @@ function resetObstacleProgress(): void {
   roughZoneSeconds = 0;
   caneScanCount = 0;
   directionDeviation = 0;
+  experienceState = getInitialExperienceState(currentPersona.id);
   inputReadyAt = 0;
   hadMovementInput = false;
   collisionLabel.textContent = '0회';
@@ -1691,6 +1974,10 @@ function completeMission(): void {
     resultEventLog.append(item);
   });
   resultPersonaNote.textContent = currentPersona.resultNote;
+  resultFatigue.textContent = `${Math.round(experienceState.fatigue)}`;
+  resultAnxiety.textContent = `${Math.round(experienceState.peakAnxiety)}`;
+  resultConfidence.textContent = `${Math.round(experienceState.minDirectionConfidence)}`;
+  resultPressure.textContent = `${Math.round(experienceState.peakTimePressure)}`;
   setTimeout(() => openModal('complete-modal'), 180);
 }
 
@@ -1734,7 +2021,8 @@ function handleMovement(delta: number): number {
 
   const acceleration = currentPersona.id === 'P-02' ? 7.5 : 12;
   const friction = 10;
-  const maxSpeed = BASE_MAX_SPEED * currentPersona.speedMultiplier * effects.speedMultiplier;
+  const fatiguePenalty = experienceEffectsEnabled ? THREE.MathUtils.lerp(1, 0.72, experienceState.fatigue / 100) : 1;
+  const maxSpeed = BASE_MAX_SPEED * currentPersona.speedMultiplier * effects.speedMultiplier * fatiguePenalty;
   const desiredZ = inputEnabled ? (Number(backward) - Number(forward)) * maxSpeed : 0;
   const desiredX = inputEnabled ? (Number(right) - Number(left)) * maxSpeed * currentPersona.strafeMultiplier : 0;
   velocity.z = THREE.MathUtils.damp(velocity.z, desiredZ, forward || backward ? acceleration : friction, delta);
@@ -1796,10 +2084,13 @@ function animate(): void {
   lastTimestamp = now;
 
   const speed = handleMovement(delta);
-  setPlayerHeight(now / 1000);
   updateSignal(elapsedSeconds);
+  updateExperienceState(delta, speed);
+  setPlayerHeight(now / 1000);
   updateObstacleTracking();
   updateHud(speed);
+  updateExperienceUI();
+  updateVisibleCane(now);
   animateDestination(now / 1000);
 
   if (!missionComplete && hasStarted && !activeEvent && camera.position.distanceTo(destination) < 2.0) completeMission();
@@ -1852,6 +2143,7 @@ function bindEvents(): void {
     applyLowSpec(lowSpecToggle.checked);
     applyGuide(guideToggle.checked);
     applyMotion(motionToggle.checked);
+    applyExperienceSettings();
     document.querySelectorAll<HTMLInputElement>('[data-obstacle-toggle]').forEach((toggle) => {
       setObstacleEnabled(toggle.dataset.obstacleToggle as ObstacleId, toggle.checked);
     });
@@ -1921,7 +2213,9 @@ function bindEvents(): void {
 }
 
 createWorld();
+createVisibleCane();
 applyPersona('P-00');
+applyExperienceSettings();
 bindEvents();
 updateSignal(0);
 updateHud(0);
