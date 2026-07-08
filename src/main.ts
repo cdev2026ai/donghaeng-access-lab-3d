@@ -166,6 +166,14 @@ const VISION_VISUAL_PRESET: Record<EffectStrength, { opacity: number; blur: numb
   high: { opacity: 0.98, blur: 2.8, center: 10, mid: 22, haze: 0.34, sceneBlur: 1.35, saturation: 0.34, brightness: 0.72 },
   veryHigh: { opacity: 1, blur: 3.5, center: 7, mid: 17, haze: 0.43, sceneBlur: 1.8, saturation: 0.26, brightness: 0.64 },
 };
+const ELDERLY_VISION_BASE = {
+  haze: 0.16,
+  blur: 0.55,
+  overlayBlur: 0.35,
+  saturation: 0.82,
+  brightness: 0.98,
+  contrast: 0.82,
+};
 
 const PERSONAS: Record<PersonaId, PersonaDefinition> = {
   'P-00': {
@@ -609,7 +617,7 @@ function getInitialExperienceState(personaId: PersonaId): ExperienceState {
   const values: Record<PersonaId, Pick<ExperienceState, 'fatigue' | 'anxiety' | 'directionConfidence' | 'visionClarity'>> = {
     'P-00': { fatigue: 0, anxiety: 3, directionConfidence: 96, visionClarity: 100 },
     'P-01': { fatigue: 5, anxiety: 8, directionConfidence: 90, visionClarity: 100 },
-    'P-02': { fatigue: 10, anxiety: 10, directionConfidence: 88, visionClarity: 96 },
+    'P-02': { fatigue: 10, anxiety: 10, directionConfidence: 88, visionClarity: 86 },
     'P-03': { fatigue: 4, anxiety: 12, directionConfidence: 54, visionClarity: 28 },
   };
   const selected = values[personaId];
@@ -672,10 +680,12 @@ function updateExperienceUI(): void {
   if (experienceState.anxiety >= 35) effects.push('불안 누적');
   if (experienceState.timePressure >= 35) effects.push('시간 압박');
   if (currentPersona.id === 'P-01' && getEnvironmentEffects(camera.position).rough) effects.push('요철 진동');
+  if (currentPersona.id === 'P-02' && experienceEffectsEnabled) effects.push('약한 흐림·대비 저하');
   if (currentPersona.id === 'P-03') effects.push(`주변부 시야 제한(${visionEffectStrength === 'veryHigh' ? '매우 강함' : visionEffectStrength === 'high' ? '강함' : visionEffectStrength === 'medium' ? '중간' : visionEffectStrength === 'low' ? '낮음' : '끔'})`);
   if (currentPersona.id === 'P-03' && experienceState.directionConfidence < 55) effects.push('방향 정보 부족');
   activeEffectList.innerHTML = effects.length ? effects.map((effect) => `<span>${effect}</span>`).join('') : '<span>적용 효과 없음</span>';
 
+  const elderlyVisionActive = currentPersona.id === 'P-02' && experienceEffectsEnabled;
   const visualFieldActive = currentPersona.id === 'P-03' && experienceEffectsEnabled && visionEffectStrength !== 'off';
   const preset = VISION_VISUAL_PRESET[visualFieldActive ? visionEffectStrength : 'off'];
   const visionMultiplier = visualFieldActive ? VISION_STRENGTH_MULTIPLIER[visionEffectStrength] : 0;
@@ -694,10 +704,26 @@ function updateExperienceUI(): void {
   experienceVisualLayer.style.setProperty('--vision-haze-opacity', (preset.haze + clarityBurden * 0.2).toFixed(2));
   experienceVisualLayer.style.setProperty('--fatigue-opacity', (experienceState.fatigue / 150).toFixed(2));
   experienceVisualLayer.style.setProperty('--anxiety-opacity', (experienceState.anxiety / 140).toFixed(2));
+  const elderlyFatigueBoost = elderlyVisionActive ? Math.min(experienceState.fatigue / 180, 0.28) : 0;
+  const elderlyPressureBoost = elderlyVisionActive ? Math.min(experienceState.timePressure / 260, 0.16) : 0;
+  const elderlyHaze = elderlyVisionActive ? Math.min(ELDERLY_VISION_BASE.haze + elderlyFatigueBoost + elderlyPressureBoost, 0.42) : 0;
+  const elderlyBlur = elderlyVisionActive ? (ELDERLY_VISION_BASE.blur + elderlyFatigueBoost * 1.6 + elderlyPressureBoost * 0.8) : 0;
+  const elderlySaturation = elderlyVisionActive ? Math.max(0.68, ELDERLY_VISION_BASE.saturation - elderlyFatigueBoost * 0.55) : 1;
+  const elderlyBrightness = elderlyVisionActive ? (ELDERLY_VISION_BASE.brightness + elderlyPressureBoost * 0.16) : 1;
+  const elderlyContrast = elderlyVisionActive ? Math.max(0.70, ELDERLY_VISION_BASE.contrast - elderlyFatigueBoost * 0.28) : 1;
+
+  experienceVisualLayer.style.setProperty('--elderly-haze-opacity', elderlyHaze.toFixed(2));
+  experienceVisualLayer.style.setProperty('--elderly-overlay-blur', `${(lowSpecEnabled ? 0 : ELDERLY_VISION_BASE.overlayBlur).toFixed(1)}px`);
+  document.body.style.setProperty('--elderly-scene-blur', `${(lowSpecEnabled ? Math.min(elderlyBlur * 0.5, 0.45) : elderlyBlur).toFixed(2)}px`);
+  document.body.style.setProperty('--elderly-scene-saturation', elderlySaturation.toFixed(2));
+  document.body.style.setProperty('--elderly-scene-brightness', elderlyBrightness.toFixed(2));
+  document.body.style.setProperty('--elderly-scene-contrast', elderlyContrast.toFixed(2));
+
   document.body.style.setProperty('--scene-vision-blur', `${sceneBlur.toFixed(1)}px`);
   document.body.style.setProperty('--scene-vision-saturation', String(preset.saturation));
   document.body.style.setProperty('--scene-vision-brightness', String(preset.brightness));
   document.body.classList.toggle('vision-effect-active', visualFieldActive);
+  document.body.classList.toggle('elderly-vision-active', elderlyVisionActive);
   document.body.classList.toggle('experience-effects-off', !experienceEffectsEnabled);
 }
 

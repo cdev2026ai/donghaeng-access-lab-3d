@@ -1013,14 +1013,16 @@ body.low-spec .event-flow-card { backdrop-filter: none; }
 .active-effect-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
 .active-effect-list span { padding: 4px 7px; border: 1px solid #d9e5ee; border-radius: 999px; color: #536e84; background: #f7fafc; font-size: 9px; font-weight: 900; }
 
-.experience-visual-layer { --vision-opacity: 0; --vision-blur: 0px; --vision-center-radius: 28%; --vision-mid-radius: 54%; --vision-haze-opacity: 0; --fatigue-opacity: 0; --anxiety-opacity: 0; --pulse-speed: 2s; position: fixed; z-index: 6; inset: 0; pointer-events: none; overflow: hidden; }
+.experience-visual-layer { --vision-opacity: 0; --vision-blur: 0px; --vision-center-radius: 28%; --vision-mid-radius: 54%; --vision-haze-opacity: 0; --elderly-haze-opacity: 0; --elderly-overlay-blur: 0px; --fatigue-opacity: 0; --anxiety-opacity: 0; --pulse-speed: 2s; position: fixed; z-index: 6; inset: 0; pointer-events: none; overflow: hidden; }
+.experience-visual-layer::after { content: ''; position: absolute; inset: 0; opacity: var(--elderly-haze-opacity); background: radial-gradient(ellipse at center, rgba(255,255,255,0.22) 0 22%, rgba(236,238,232,0.18) 38%, rgba(210,214,207,0.14) 62%, rgba(188,195,190,0.10) 100%), linear-gradient(180deg, rgba(255,255,255,0.08), rgba(226,226,215,0.08)); backdrop-filter: blur(var(--elderly-overlay-blur)) saturate(0.88) contrast(0.90); transition: opacity 0.25s ease, backdrop-filter 0.25s ease; }
 .experience-visual-layer .vision-vignette { position: absolute; inset: -3px; opacity: var(--vision-opacity); background: radial-gradient(ellipse at center, transparent 0 var(--vision-center-radius), rgba(13,22,28,0.28) calc(var(--vision-center-radius) + 4%), rgba(5,13,18,0.84) var(--vision-mid-radius), rgba(1,5,8,0.995) 100%); box-shadow: inset 0 0 150px rgba(0,0,0,0.96); backdrop-filter: blur(var(--vision-blur)) saturate(0.46) contrast(0.90); transition: opacity 0.25s ease, backdrop-filter 0.25s ease, background 0.25s ease; }
 .experience-visual-layer .vision-focus-haze { position: absolute; inset: 0; opacity: var(--vision-haze-opacity); background: radial-gradient(ellipse at center, rgba(222,232,236,0.17) 0 14%, rgba(105,120,128,0.14) 25%, rgba(24,35,42,0.06) 42%, rgba(0,0,0,0) 52%); mix-blend-mode: screen; transition: opacity 0.25s ease; }
 .experience-visual-layer .fatigue-haze { position: absolute; inset: 0; opacity: var(--fatigue-opacity); background: linear-gradient(180deg, rgba(20,30,38,0.04), rgba(20,30,38,0.72)); transition: opacity 0.3s ease; }
 .experience-visual-layer .anxiety-frame { position: absolute; inset: 0; opacity: var(--anxiety-opacity); border: clamp(10px, 2vw, 28px) solid rgba(176,42,42,0.58); box-shadow: inset 0 0 70px rgba(190,46,46,0.48); animation: anxiety-pulse var(--pulse-speed) ease-in-out infinite; }
 @keyframes anxiety-pulse { 0%,100% { filter: opacity(0.42); } 50% { filter: opacity(1); } }
 body.experience-effects-off .experience-visual-layer { display: none; }
-body.low-spec .experience-visual-layer .vision-vignette { backdrop-filter: none; }
+body.low-spec .experience-visual-layer .vision-vignette,
+body.low-spec .experience-visual-layer::after { backdrop-filter: none; }
 body.high-contrast { --panel: rgba(255,255,255,0.98); }
 body.high-contrast .mission-card, body.high-contrast .status-card, body.high-contrast .obstacle-card, body.high-contrast .event-flow-card, body.high-contrast .experience-state-card { border: 2px solid #0b2d5b; }
 body.high-contrast .context-message { background: rgba(0,18,42,0.94); border: 2px solid white; }
@@ -1037,7 +1039,11 @@ body.high-contrast .state-track { background: #b9c9d7; }
 .experience-result-summary span { display: block; color: #7b6c5b; font-size: 10px; }
 .experience-result-summary strong { display: block; margin-top: 4px; color: var(--navy); font-size: 17px; }
 
-body[data-persona="P-03"] #scene { filter: saturate(0.92); transition: filter 0.25s ease; }
+body[data-persona="P-02"] #scene,
+body[data-persona="P-03"] #scene { transition: filter 0.25s ease; }
+body[data-persona="P-02"].elderly-vision-active #scene { filter: blur(var(--elderly-scene-blur, 0.45px)) saturate(var(--elderly-scene-saturation, 0.82)) brightness(var(--elderly-scene-brightness, 0.98)) contrast(var(--elderly-scene-contrast, 0.82)); }
+body[data-persona="P-02"].elderly-vision-active.high-contrast #scene { filter: blur(var(--elderly-scene-blur, 0.45px)) saturate(0.92) brightness(1) contrast(0.95); }
+body[data-persona="P-03"] #scene { filter: saturate(0.92); }
 body[data-persona="P-03"].vision-effect-active #scene { filter: blur(var(--scene-vision-blur, 0px)) saturate(var(--scene-vision-saturation, 0.8)) brightness(var(--scene-vision-brightness, 0.9)) contrast(0.96); }
 body[data-persona="P-03"].vision-effect-active.high-contrast #scene { filter: blur(var(--scene-vision-blur, 0px)) saturate(var(--scene-vision-saturation, 0.8)) brightness(var(--scene-vision-brightness, 0.9)) contrast(1.12); }
 
