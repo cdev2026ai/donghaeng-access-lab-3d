@@ -299,7 +299,12 @@ const keys = new Set<string>();
 const velocity = new THREE.Vector3();
 const previousPosition = new THREE.Vector3();
 const startPosition = new THREE.Vector3(0, PERSONAS['P-00'].cameraHeight, 22);
-const destination = new THREE.Vector3(4.7, PERSONAS['P-00'].cameraHeight, -22.5);
+const DESTINATION_X = -5.8;
+const DESTINATION_Z = -26.0;
+const PARKED_CAR_ROUTE_X = 0.72;
+const PARKED_CAR_ROUTE_Z = -12.35;
+const destination = new THREE.Vector3(DESTINATION_X, PERSONAS['P-00'].cameraHeight, DESTINATION_Z);
+const parkedCarRoutePoint = new THREE.Vector3(PARKED_CAR_ROUTE_X, PERSONAS['P-00'].cameraHeight, PARKED_CAR_ROUTE_Z);
 const colliders: BoxCollider[] = [];
 const obstacles = new Map<ObstacleId, ObstacleDefinition>();
 const speedZones: RectZone[] = [];
@@ -380,6 +385,7 @@ const distanceLabel = query<HTMLElement>('#distance-label');
 const missionProgress = query<HTMLElement>('#mission-progress');
 const missionCheckSidewalk = query<HTMLElement>('#mission-check-sidewalk');
 const missionCheckCrossing = query<HTMLElement>('#mission-check-crossing');
+const missionCheckParkedCar = query<HTMLElement>('#mission-check-parked-car');
 const missionCheckDestination = query<HTMLElement>('#mission-check-destination');
 const personaModeBadge = query<HTMLElement>('#persona-mode-badge');
 const assistModeBadge = query<HTMLElement>('#assist-mode-badge');
@@ -875,6 +881,33 @@ function addTextSprite(text: string, position: THREE.Vector3, accent = '#0b2d5b'
   return sprite;
 }
 
+
+function createParkedCarRouteGuide(): void {
+  const points = [
+    new THREE.Vector3(CROSSWALK_CENTER_X, 0.16, CROSSWALK_EXIT_Z - 0.8),
+    new THREE.Vector3(2.1, 0.16, -8.2),
+    new THREE.Vector3(PARKED_CAR_ROUTE_X, 0.16, PARKED_CAR_ROUTE_Z),
+    new THREE.Vector3(-2.3, 0.16, -18.4),
+    new THREE.Vector3(DESTINATION_X, 0.16, DESTINATION_Z + 2.4),
+  ];
+
+  points.slice(0, -1).forEach((start, index) => {
+    const end = points[index + 1];
+    const distance = start.distanceTo(end);
+    const steps = Math.max(3, Math.floor(distance / 1.15));
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = THREE.MathUtils.lerp(start.x, end.x, t);
+      const z = THREE.MathUtils.lerp(start.z, end.z, t);
+      const dot = addBox(`route-guide-${index}-${i}`, new THREE.Vector3(0.42, 0.028, 0.42), new THREE.Vector3(x, 0.18, z), 0x21c7c9, { castShadow: false, opacity: 0.55 });
+      dot.rotation.y = Math.PI / 4;
+    }
+  });
+
+  addBox('O-03-route-focus', new THREE.Vector3(1.25, 0.035, 1.25), new THREE.Vector3(PARKED_CAR_ROUTE_X, 0.2, PARKED_CAR_ROUTE_Z), 0xffc857, { castShadow: false, opacity: 0.72 });
+  addTextSprite('권장 경로: 불법 주차 차량 옆 좁은 통로 통과', new THREE.Vector3(0.5, 3.4, -13.2), '#a05a00', 0.64);
+}
+
 function createWorld(): void {
   const hemi = new THREE.HemisphereLight(0xeef8ff, 0x6d8b55, 2.15);
   scene.add(hemi);
@@ -924,12 +957,12 @@ function createWorld(): void {
   ] as const;
   buildingData.forEach(([x, y, z, w, h, d, color], index) => addBox(`building-${index}`, new THREE.Vector3(w, h, d), new THREE.Vector3(x, y, z), color, { collider: true }));
 
-  addBox('bus-stop-roof', new THREE.Vector3(7.5, 0.35, 3.2), new THREE.Vector3(4.7, 3.45, -22.7), 0x0f8b8d);
-  addBox('bus-stop-back', new THREE.Vector3(7.5, 3.2, 0.18), new THREE.Vector3(4.7, 1.75, -24.15), 0x80cfd0, { opacity: 0.5 });
-  addBox('bus-stop-post-left', new THREE.Vector3(0.22, 3.2, 0.22), new THREE.Vector3(1.3, 1.75, -22.7), 0x365f70);
-  addBox('bus-stop-post-right', new THREE.Vector3(0.22, 3.2, 0.22), new THREE.Vector3(8.1, 1.75, -22.7), 0x365f70);
-  addBox('bus-stop-bench', new THREE.Vector3(4.3, 0.35, 0.8), new THREE.Vector3(4.7, 0.75, -23.25), 0x32617b, { collider: true });
-  addTextSprite('버스정류장', new THREE.Vector3(4.7, 4.4, -22.7), '#0f6c6e');
+  addBox('bus-stop-roof', new THREE.Vector3(7.5, 0.35, 3.2), new THREE.Vector3(DESTINATION_X, 3.45, DESTINATION_Z - 0.2), 0x0f8b8d);
+  addBox('bus-stop-back', new THREE.Vector3(7.5, 3.2, 0.18), new THREE.Vector3(DESTINATION_X, 1.75, DESTINATION_Z - 1.65), 0x80cfd0, { opacity: 0.5 });
+  addBox('bus-stop-post-left', new THREE.Vector3(0.22, 3.2, 0.22), new THREE.Vector3(DESTINATION_X - 3.4, 1.75, DESTINATION_Z - 0.2), 0x365f70);
+  addBox('bus-stop-post-right', new THREE.Vector3(0.22, 3.2, 0.22), new THREE.Vector3(DESTINATION_X + 3.4, 1.75, DESTINATION_Z - 0.2), 0x365f70);
+  addBox('bus-stop-bench', new THREE.Vector3(4.3, 0.35, 0.8), new THREE.Vector3(DESTINATION_X, 0.75, DESTINATION_Z - 0.75), 0x32617b, { collider: true });
+  addTextSprite('버스정류장', new THREE.Vector3(DESTINATION_X, 4.4, DESTINATION_Z - 0.2), '#0f6c6e');
 
   const destinationRing = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.13, 12, 48), new THREE.MeshStandardMaterial({ color: 0x20c7c9, emissive: 0x0f8b8d, emissiveIntensity: 1.3 }));
   destinationRing.position.set(destination.x, 0.18, destination.z);
@@ -940,6 +973,7 @@ function createWorld(): void {
   destinationColumn.position.set(destination.x, 2.65, destination.z);
   destinationColumn.userData.isDestination = true;
   scene.add(destinationColumn);
+  createParkedCarRouteGuide();
 
   createPedestrianSignal(1.2, 6.0, 0);
   createPedestrianSignal(7.2, -6.0, 0);
@@ -1243,8 +1277,8 @@ function createParkedCarObstacle(): void {
     detectionRadius: 5.3,
     passZ: -12.7,
     group,
-    environmentMessage: '차량이 보도를 막아 통로 폭과 차도 경계를 직접 확인해야 합니다.',
-    appMessage: '전방 차량이 보도를 막고 있습니다. 오른쪽 통로 폭을 확인하고 통과가 어려우면 되돌아가세요.',
+    environmentMessage: '목적지로 가는 경로에 불법 주차 차량이 있어 통로 폭과 차도 경계를 직접 확인해야 합니다.',
+    appMessage: '목적지 방향 통로가 불법 주차 차량으로 좁아졌습니다. 차량 오른쪽 통로 폭을 확인하고, 통과가 어려우면 우회하세요.',
   });
 }
 
@@ -1784,6 +1818,20 @@ function getDirectionInstruction(target: THREE.Vector3): string {
   return cross > 0 ? `오른쪽 ${degrees}도` : `왼쪽 ${degrees}도`;
 }
 
+
+function hasObservedParkedCarRoute(): boolean {
+  const parked = obstacles.get('O-03');
+  return Boolean(parked?.encountered || observationRecords.has('O-03'));
+}
+
+function getParkedCarRouteDistance(): number {
+  return camera.position.distanceTo(parkedCarRoutePoint);
+}
+
+function shouldGuideTowardParkedCarRoute(): boolean {
+  return hasStarted && !missionComplete && journeyPhase === 'POST_CROSS' && !hasObservedParkedCarRoute();
+}
+
 function buildAssistGuidance(): AssistGuidance {
   const recommendation = getCrossingRecommendation();
   if (journeyPhase === 'WAIT_SIGNAL' || journeyPhase === 'CROSS_PREP') {
@@ -1841,6 +1889,19 @@ function buildAssistGuidance(): AssistGuidance {
     };
   }
 
+  if (shouldGuideTowardParkedCarRoute()) {
+    const direction = getDirectionInstruction(parkedCarRoutePoint);
+    const distance = getParkedCarRouteDistance();
+    return {
+      id: `parked-car-route-${Math.ceil(distance)}`,
+      title: '불법 주차 차량 구간을 지나야 합니다.',
+      facts: [`경유 지점까지 약 ${distance.toFixed(1)}m`, `진행 방향 ${direction}`, '차량과 울타리 사이 통로 폭 확인'],
+      recommendation: '목적지는 불법 주차 차량 뒤쪽에 있습니다. 바닥의 청록색 경로 표시를 따라 좁은 통로를 관찰하며 이동하세요.',
+      priority: 'caution',
+      speak: '목적지는 불법 주차 차량 뒤쪽에 있습니다. 좁은 통로 폭을 확인하며 이동하세요.',
+    };
+  }
+
   if (currentObstacleId) {
     const obstacle = obstacles.get(currentObstacleId);
     if (obstacle) {
@@ -1871,9 +1932,9 @@ function buildAssistGuidance(): AssistGuidance {
     id: 'route-default',
     title: '버스정류장 방향으로 이동합니다.',
     facts: [`남은 거리 ${camera.position.distanceTo(destination).toFixed(0)}m`, `현재 구간 ${getJourneyLabel()}`],
-    recommendation: '주변 환경과 이동 가능한 폭을 확인하며 이동하세요.',
-    priority: 'normal',
-    speak: '버스정류장 방향으로 이동하세요.',
+    recommendation: hasObservedParkedCarRoute() ? '버스정류장 방향으로 이동하세요.' : '불법 주차 차량이 보도를 막은 좁은 통로를 경유해 버스정류장으로 이동하세요.',
+    priority: hasObservedParkedCarRoute() ? 'normal' : 'caution',
+    speak: hasObservedParkedCarRoute() ? '버스정류장 방향으로 이동하세요.' : '불법 주차 차량 옆 좁은 통로를 경유해 이동하세요.',
   };
 }
 
@@ -2110,6 +2171,9 @@ function updateMissionUI(): void {
   missionCheckSidewalk.dataset.state = journeyPhase === 'READY' ? 'pending' : 'done';
   missionCheckCrossing.textContent = crossingMetrics.crossingCompleted ? '횡단 완료' : journeyPhase === 'CROSSING' ? '횡단 중' : '횡단 전';
   missionCheckCrossing.dataset.state = crossingMetrics.crossingCompleted ? 'done' : journeyPhase === 'CROSSING' ? 'active' : 'pending';
+  const parkedObserved = hasObservedParkedCarRoute();
+  missionCheckParkedCar.textContent = parkedObserved ? '불법 주차 구간 관찰' : journeyPhase === 'POST_CROSS' ? '불법 주차 구간 이동 중' : '불법 주차 구간 전';
+  missionCheckParkedCar.dataset.state = parkedObserved ? 'done' : journeyPhase === 'POST_CROSS' ? 'active' : 'pending';
   missionCheckDestination.textContent = missionComplete ? '목적지 도착' : '목적지 도착 전';
   missionCheckDestination.dataset.state = missionComplete ? 'done' : 'pending';
 }
@@ -2163,6 +2227,7 @@ function buildMissingInformation(): string[] {
     if (currentPersona.id === 'P-01') items.push('횡단 진입·이탈 경사로의 방향과 거리', '현재 속도로 신호 안에 횡단 가능한지에 대한 근거');
     if (currentPersona.id === 'P-02') items.push('보행 신호 잔여 시간과 예상 횡단 시간의 비교', '다음 신호를 기다려야 하는지에 대한 권고');
     if (currentPersona.id === 'P-03') items.push('보행 신호 상태를 전달하는 음성 정보', '횡단 방향 각도와 반대편까지 남은 거리');
+    if (hasObservedParkedCarRoute()) items.push('불법 주차 차량으로 좁아진 통로 폭과 안전한 통과 가능 여부');
     if (blockedAttemptCount > 0) items.push('통과 가능한 폭과 우회 방향');
     if (collisionCount > 0) items.push('장애물까지의 거리와 충돌 전 경고');
   } else {
@@ -2175,6 +2240,7 @@ function buildMissingInformation(): string[] {
 
 function buildAppRequirements(): string[] {
   const items: string[] = ['장애물의 종류뿐 아니라 거리·방향·통과 가능 조건을 함께 제공'];
+  if (hasObservedParkedCarRoute()) items.push('불법 주차 차량처럼 경로를 막는 장애물은 통로 폭과 우회 가능성을 함께 안내');
   if (currentPersona.id === 'P-01') items.push('진입·이탈 경사로의 방향과 폭, 회전 가능한 공간 안내');
   if (currentPersona.id === 'P-02') items.push('현재 보행 속도와 남은 신호 시간을 비교한 출발·대기 권고');
   if (currentPersona.id === 'P-03') items.push('보행 신호·횡단 방향·남은 거리를 자막과 TTS로 제공');
@@ -2344,7 +2410,10 @@ function animate(): void {
   updateAnalysisPanel(speed);
   animateDestination(now / 1000);
 
-  if (!missionComplete && hasStarted && camera.position.distanceTo(destination) < 2.0) completeMission();
+  if (!missionComplete && hasStarted && camera.position.distanceTo(destination) < 2.0) {
+    if (hasObservedParkedCarRoute()) completeMission();
+    else setContextOverride('경유 구간 확인', '불법 주차 차량이 보도를 막은 좁은 통로를 관찰한 뒤 목적지에 도착해야 합니다.', 2800);
+  }
   renderer.render(scene, camera);
 }
 
