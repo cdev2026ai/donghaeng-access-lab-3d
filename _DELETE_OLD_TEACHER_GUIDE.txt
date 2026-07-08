@@ -1,0 +1,5 @@
+학생용 레포에서는 강사용 가이드 문서를 제외합니다.
+기존 레포에 docs/teacher-guide 폴더가 남아 있다면 삭제해 주세요.
+
+삭제 경로:
+docs/teacher-guide/

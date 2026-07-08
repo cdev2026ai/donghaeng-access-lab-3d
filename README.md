@@ -9,9 +9,9 @@
 | 구분 | URL | 용도 |
 |---|---|---|
 | 학생용 체험 | https://cdev2026ai.github.io/donghaeng-access-lab-3d/ | 수업 중 학생 체험용 안정 버전 |
-| 개발자·강사용 검수 | https://cdev2026ai.github.io/donghaeng-access-lab-3d-dev/ | 좌표, 체크포인트, 장애물, 신호 검수용 별도 레포 |
+| 개발자용 검수 | https://cdev2026ai.github.io/donghaeng-access-lab-3d-dev/ | 좌표, 체크포인트, 장애물, 신호 검수용 별도 레포 |
 
-> 개발자용 기능은 학생용 레포에 포함하지 않고 별도 레포에서 운영합니다.
+> 이 레포지토리는 **학생용 체험 버전**입니다. 체크포인트 순간 이동, 좌표 디버깅, 결과 강제 열기 같은 개발자 도구는 별도 레포 `donghaeng-access-lab-3d-dev`에서 관리합니다.
 
 ## 프로젝트 목적
 
@@ -44,7 +44,7 @@
 4. 학교 정문에서 버스정류장까지 연속 이동
 5. 횡단보도 신호, 장애물, 경로 제약 관찰
 6. 결과 화면에서 부족했던 정보 확인
-7. 워크북에 앱 요구사항으로 정리
+7. 앱 요구사항으로 정리
 ```
 
 권장 체험 순서:
@@ -85,7 +85,7 @@ Three.js 기반 장면, 카메라, 이동, 충돌 처리
 | 3D 렌더링 | Three.js |
 | 개발 환경 | TypeScript, Vite |
 | 배포 | GitHub Pages, GitHub Actions |
-| 문서 | Markdown 기반 repo/docs 온라인 위키 구조 |
+| 문서 | Markdown 기반 `docs/` 온라인 위키 구조 |
 
 ## 로컬 실행
 
@@ -102,29 +102,30 @@ npm run build
 
 ## 문서 바로가기
 
-### 학생용
+### 학생용 문서
 
 - [학생용 빠른 시작](docs/student-guide/quick-start.md)
 - [학생용 체험 가이드](docs/student-guide/experience-guide.md)
 - [앱 요구사항 도출 가이드](docs/student-guide/app-requirements-guide.md)
-
-### 강사용
-
-- [수업 운영 가이드](docs/teacher-guide/class-operation-guide.md)
-- [수업 중 체크리스트](docs/teacher-guide/session-checklist.md)
-- [워크북 연결 가이드](docs/teacher-guide/workbook-connection.md)
+- [체험 관찰 체크리스트](docs/student-guide/observation-checklist.md)
 
 ### 기획 문서
 
 - [프로젝트 기획 개요](docs/planning/project-overview.md)
+- [사용자 플로우](docs/planning/user-flow.md)
+- [화면 구조](docs/planning/screen-structure.md)
 - [이동약자 페르소나](docs/planning/personas.md)
 - [환경 장벽과 장애물](docs/planning/obstacles.md)
 - [횡단보도·신호 기획](docs/planning/crosswalk-signal.md)
 - [이동 보조 앱 OFF/ON 기획](docs/planning/assist-app-mode.md)
+- [결과 화면 기획](docs/planning/result-screen.md)
+- [연속 체험 설계](docs/planning/continuous-experience.md)
+- [감각 효과 설계](docs/planning/sensory-effects.md)
 
-### 개발·배포 문서
+### 구조·배포 문서
 
 - [시스템 아키텍처](docs/architecture/system-architecture.md)
+- [학생용/개발자용 레포 분리](docs/architecture/repo-separation.md)
 - [장면 좌표와 배치 기준](docs/developer-guide/scene-map.md)
 - [배포 가이드](docs/developer-guide/deploy-guide.md)
 - [문제 해결 가이드](docs/developer-guide/troubleshooting.md)
@@ -135,9 +136,7 @@ npm run build
 | 레포 | 역할 |
 |---|---|
 | `donghaeng-access-lab-3d` | 학생용 체험 시뮬레이터 |
-| `donghaeng-access-lab-3d-dev` | 강사·개발자용 검수 시뮬레이터 |
-
-학생용 레포에는 체크포인트 순간 이동, 결과 강제 열기, 좌표 실시간 표시 같은 개발자 도구를 넣지 않습니다.
+| `donghaeng-access-lab-3d-dev` | 개발자용 검수 시뮬레이터 |
 
 ## 교육적 안내
 
