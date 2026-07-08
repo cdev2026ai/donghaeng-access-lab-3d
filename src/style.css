@@ -1393,7 +1393,7 @@ body[data-persona="P-03"].vision-effect-active.high-contrast #scene { filter: bl
   .comparison-toolbar { align-items: flex-start; flex-direction: column; }
 }
 
-/* v0.9 — 연속 체험·횡단보도 신호·이동 보조 앱 */
+/* v0.9.1 — 연속 체험·횡단보도 신호·이동 보조 앱 */
 .condition-badges {
   position: absolute;
   left: 50%;

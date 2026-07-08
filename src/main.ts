@@ -31,6 +31,7 @@ type PersonaDefinition = {
   cameraHeight: number;
   radius: number;
   speedMultiplier: number;
+  crosswalkSpeedMultiplier: number;
   strafeMultiplier: number;
   turnMultiplier: number;
   reactionDelay: number;
@@ -151,10 +152,11 @@ const SIGNAL_DURATIONS: Record<PedestrianSignalPhase, number> = {
   INIT_SAFE: 1,
   RED_WAIT: 8,
   GREEN_START: 1,
-  GREEN_ACTIVE: 17,
-  FLASH_WARNING: 6,
+  GREEN_ACTIVE: 11,
+  FLASH_WARNING: 5,
   ALL_STOP: 2,
 };
+const PEDESTRIAN_GREEN_DURATION = SIGNAL_DURATIONS.GREEN_START + SIGNAL_DURATIONS.GREEN_ACTIVE + SIGNAL_DURATIONS.FLASH_WARNING;
 const VISION_STRENGTH_MULTIPLIER: Record<EffectStrength, number> = { off: 0, low: 0.56, medium: 0.78, high: 0.93 };
 const VISION_BASE_MASK: Record<EffectStrength, number> = { off: 0, low: 0.25, medium: 0.43, high: 0.58 };
 
@@ -168,6 +170,7 @@ const PERSONAS: Record<PersonaId, PersonaDefinition> = {
     cameraHeight: 1.65,
     radius: 0.25,
     speedMultiplier: 1,
+    crosswalkSpeedMultiplier: 1,
     strafeMultiplier: 1,
     turnMultiplier: 1,
     reactionDelay: 0,
@@ -189,6 +192,7 @@ const PERSONAS: Record<PersonaId, PersonaDefinition> = {
     cameraHeight: 0.95,
     radius: 0.45,
     speedMultiplier: 0.7,
+    crosswalkSpeedMultiplier: 0.78,
     strafeMultiplier: 0.6,
     turnMultiplier: 0.72,
     reactionDelay: 0,
@@ -210,6 +214,7 @@ const PERSONAS: Record<PersonaId, PersonaDefinition> = {
     cameraHeight: 1.45,
     radius: 0.275,
     speedMultiplier: 0.55,
+    crosswalkSpeedMultiplier: 0.4,
     strafeMultiplier: 0.7,
     turnMultiplier: 0.62,
     reactionDelay: 0.3,
@@ -231,6 +236,7 @@ const PERSONAS: Record<PersonaId, PersonaDefinition> = {
     cameraHeight: 1.55,
     radius: 0.275,
     speedMultiplier: 0.6,
+    crosswalkSpeedMultiplier: 0.68,
     strafeMultiplier: 0.75,
     turnMultiplier: 0.75,
     reactionDelay: 0.08,
@@ -886,7 +892,7 @@ function createWorld(): void {
   destinationColumn.userData.isDestination = true;
   scene.add(destinationColumn);
 
-  createPedestrianSignal(1.2, 6.0, Math.PI);
+  createPedestrianSignal(1.2, 6.0, 0);
   createPedestrianSignal(7.2, -6.0, 0);
   createVehicles();
 
@@ -916,26 +922,103 @@ function createCrosswalkCurbsAndRamps(): void {
   addTextSprite('보행 신호 · 횡단보도', new THREE.Vector3(CROSSWALK_CENTER_X, 5.2, 0), '#0b2d5b', 0.72);
 }
 
+function createSignalPanelTexture(): { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D; texture: THREE.CanvasTexture } {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 384;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context is unavailable.');
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return { canvas, context, texture };
+}
+
+function drawPedestrianFigure(context: CanvasRenderingContext2D, color: string, walking: boolean): void {
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = 17;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.beginPath();
+  context.arc(128, 72, 24, 0, Math.PI * 2);
+  context.fill();
+  context.beginPath();
+  context.moveTo(128, 108);
+  context.lineTo(walking ? 116 : 128, 190);
+  context.moveTo(123, 130);
+  context.lineTo(walking ? 76 : 91, walking ? 166 : 168);
+  context.moveTo(125, 132);
+  context.lineTo(walking ? 174 : 165, walking ? 148 : 168);
+  context.moveTo(walking ? 116 : 128, 190);
+  context.lineTo(walking ? 76 : 98, walking ? 250 : 254);
+  context.moveTo(walking ? 116 : 128, 190);
+  context.lineTo(walking ? 171 : 158, walking ? 237 : 254);
+  context.stroke();
+  context.restore();
+}
+
+function drawSignalPanel(mesh: THREE.Mesh, phase: PedestrianSignalPhase, seconds: number): void {
+  const panel = mesh.userData.signalPanel as { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D; texture: THREE.CanvasTexture } | undefined;
+  if (!panel) return;
+  const { canvas, context, texture } = panel;
+  const green = phase === 'GREEN_START' || phase === 'GREEN_ACTIVE' || phase === 'FLASH_WARNING';
+  const flashingOff = phase === 'FLASH_WARNING' && Math.floor(signalPhaseElapsed * 3) % 2 === 1;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#111a22');
+  gradient.addColorStop(1, '#05080b');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = '#4d5d69';
+  context.lineWidth = 9;
+  context.strokeRect(5, 5, canvas.width - 10, canvas.height - 10);
+  const figureColor = green ? (flashingOff ? '#173a2a' : '#2eff94') : '#ff4b55';
+  drawPedestrianFigure(context, figureColor, green);
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.font = '700 76px Arial, sans-serif';
+  context.fillStyle = phase === 'FLASH_WARNING' ? '#ffd45c' : '#ffffff';
+  context.shadowColor = context.fillStyle;
+  context.shadowBlur = 18;
+  context.fillText(String(Math.max(0, Math.ceil(seconds))), 128, 326);
+  context.shadowBlur = 0;
+  texture.needsUpdate = true;
+}
+
 function createPedestrianSignal(x: number, z: number, rotationY: number): void {
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   group.rotation.y = rotationY;
   group.userData.pedestrianSignal = true;
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 4.2, 12), makeMaterial(0x34495e, 0.55, 0.3));
-  pole.position.y = 2.1;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 4.35, 12), makeMaterial(0x34495e, 0.55, 0.3));
+  pole.position.y = 2.175;
   group.add(pole);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.6, 0.5), makeMaterial(0x26323d, 0.5, 0.2));
-  head.position.set(0, 3.55, 0);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.18, 1.9, 0.56), makeMaterial(0x17212a, 0.5, 0.2));
+  head.position.set(0, 3.62, 0);
   group.add(head);
-  const red = new THREE.Mesh(new THREE.CircleGeometry(0.26, 24), new THREE.MeshStandardMaterial({ color: 0xd84e4e, emissive: 0xd84e4e, emissiveIntensity: 1.2 }));
-  red.position.set(0, 3.9, -0.26);
+
+  const panelData = createSignalPanelTexture();
+  const panel = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.92, 1.55),
+    new THREE.MeshBasicMaterial({ map: panelData.texture, side: THREE.DoubleSide, toneMapped: false }),
+  );
+  panel.position.set(0, 3.62, 0.286);
+  panel.userData.signalPanel = panelData;
+  group.add(panel);
+
+  const red = new THREE.Mesh(new THREE.CircleGeometry(0.09, 20), new THREE.MeshStandardMaterial({ color: 0xd84e4e, emissive: 0xd84e4e, emissiveIntensity: 1.8, side: THREE.DoubleSide }));
+  red.position.set(-0.43, 4.43, 0.292);
   red.userData.signalLens = 'red';
   group.add(red);
-  const green = new THREE.Mesh(new THREE.CircleGeometry(0.26, 24), new THREE.MeshStandardMaterial({ color: 0x35c978, emissive: 0x35c978, emissiveIntensity: 0.08 }));
-  green.position.set(0, 3.2, -0.26);
+  const green = new THREE.Mesh(new THREE.CircleGeometry(0.09, 20), new THREE.MeshStandardMaterial({ color: 0x35c978, emissive: 0x35c978, emissiveIntensity: 0.05, side: THREE.DoubleSide }));
+  green.position.set(0.43, 4.43, 0.292);
   green.userData.signalLens = 'green';
   group.add(green);
   scene.add(group);
+  drawSignalPanel(panel, signalPhase, getSignalObjectTimeRemaining());
 }
 
 function createVehicleMesh(color: number): THREE.Group {
@@ -1304,6 +1387,29 @@ function setPlayerHeight(time: number): void {
   camera.position.y = THREE.MathUtils.lerp(camera.position.y, y, 0.34);
 }
 
+function getPedestrianGreenRemaining(): number {
+  if (signalPhase === 'GREEN_START') return signalTimeRemaining + SIGNAL_DURATIONS.GREEN_ACTIVE + SIGNAL_DURATIONS.FLASH_WARNING;
+  if (signalPhase === 'GREEN_ACTIVE') return signalTimeRemaining + SIGNAL_DURATIONS.FLASH_WARNING;
+  if (signalPhase === 'FLASH_WARNING') return signalTimeRemaining;
+  return 0;
+}
+
+function getSignalObjectTimeRemaining(): number {
+  return isPedestrianGreen() ? getPedestrianGreenRemaining() : signalTimeRemaining;
+}
+
+function getCrosswalkSpeedMultiplier(): number {
+  return journeyPhase === 'CROSS_PREP' || journeyPhase === 'CROSSING' ? currentPersona.crosswalkSpeedMultiplier : 1;
+}
+
+function elderlyNeedsSignalExtension(): boolean {
+  if (currentPersona.id !== 'P-02') return false;
+  const fullCycleEstimate = CROSSWALK_LENGTH / Math.max(0.1, BASE_MAX_SPEED * currentPersona.speedMultiplier * currentPersona.crosswalkSpeedMultiplier)
+    + currentPersona.crossingReactionDelay
+    + currentPersona.crossingAlignmentDelay;
+  return fullCycleEstimate > PEDESTRIAN_GREEN_DURATION;
+}
+
 function isPedestrianGreen(): boolean {
   return signalPhase === 'GREEN_START' || signalPhase === 'GREEN_ACTIVE' || signalPhase === 'FLASH_WARNING';
 }
@@ -1342,6 +1448,7 @@ function updateSignal(delta: number): void {
   signalPhaseElapsed += delta;
   signalTimeRemaining = Math.max(0, SIGNAL_DURATIONS[signalPhase] - signalPhaseElapsed);
   if (signalPhaseElapsed >= SIGNAL_DURATIONS[signalPhase]) setSignalPhase(nextSignalPhase(signalPhase));
+  updateSignalVisuals();
   if (audibleSignalEnabled && isPedestrianGreen() && elapsedSeconds - signalAudioLastAt >= 1) {
     signalAudioLastAt = elapsedSeconds;
     playSignalTone(isFlashWarning());
@@ -1369,13 +1476,17 @@ function playSignalTone(urgent: boolean): void {
 
 function updateSignalVisuals(): void {
   const green = isPedestrianGreen();
+  const flashOff = isFlashWarning() && Math.floor(signalPhaseElapsed * 3) % 2 === 1;
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     const lens = object.userData.signalLens as 'red' | 'green' | undefined;
-    if (!lens || !(object.material instanceof THREE.MeshStandardMaterial)) return;
-    const on = lens === 'green' ? green : !green;
-    object.material.emissiveIntensity = on ? (isFlashWarning() && lens === 'green' ? 1.8 : 1.25) : 0.05;
-    object.visible = !(isFlashWarning() && lens === 'green' && Math.floor(signalPhaseElapsed * 3) % 2 === 1);
+    if (lens && object.material instanceof THREE.MeshStandardMaterial) {
+      const on = lens === 'green' ? green && !flashOff : !green;
+      object.material.emissiveIntensity = on ? 2.6 : 0.02;
+      object.material.color.setHex(on ? (lens === 'green' ? 0x35f08c : 0xff4b55) : (lens === 'green' ? 0x123522 : 0x3d1719));
+      object.visible = true;
+    }
+    if (object.userData.signalPanel) drawSignalPanel(object, signalPhase, getSignalObjectTimeRemaining());
   });
 }
 
@@ -1388,7 +1499,7 @@ function getSignalDisplay(): { label: string; icon: string; note: string; classN
     return { label: '보행 대기', icon: '■', note: audibleSignalEnabled && currentPersona.id === 'P-03' ? '음향 신호가 대기 상태를 알립니다.' : '대기선 뒤에서 다음 보행 신호를 확인하세요.', className: 'signal-stop', time: `${Math.ceil(signalTimeRemaining)}초` };
   }
   if (signalPhase === 'FLASH_WARNING') return { label: '종료 임박', icon: '!', note: '새로 출발하기보다 현재 위치와 남은 거리를 확인하세요.', className: 'signal-warning', time: `${Math.ceil(signalTimeRemaining)}초` };
-  return { label: signalPhase === 'GREEN_START' ? '보행 신호 시작' : '보행 가능', icon: '▶', note: audibleSignalEnabled && currentPersona.id === 'P-03' ? '음향 신호가 보행 가능 상태를 알립니다.' : '현재 속도와 남은 시간을 확인하세요.', className: 'signal-go', time: `${Math.ceil(signalTimeRemaining)}초` };
+  return { label: signalPhase === 'GREEN_START' ? '보행 신호 시작' : '보행 가능', icon: '▶', note: audibleSignalEnabled && currentPersona.id === 'P-03' ? '음향 신호가 보행 가능 상태를 알립니다.' : '현재 속도와 남은 시간을 확인하세요.', className: 'signal-go', time: `${Math.ceil(getPedestrianGreenRemaining())}초` };
 }
 
 function updateSignalHud(): void {
@@ -1403,7 +1514,7 @@ function updateSignalHud(): void {
 function getEffectiveSpeed(): number {
   const effects = getEnvironmentEffects(camera.position);
   const fatiguePenalty = experienceEffectsEnabled ? THREE.MathUtils.lerp(1, 0.72, experienceState.fatigue / 100) : 1;
-  return Math.max(0.25, BASE_MAX_SPEED * currentPersona.speedMultiplier * effects.speedMultiplier * fatiguePenalty);
+  return Math.max(0.25, BASE_MAX_SPEED * currentPersona.speedMultiplier * getCrosswalkSpeedMultiplier() * effects.speedMultiplier * fatiguePenalty);
 }
 
 function getRemainingCrossingDistance(): number {
@@ -1418,7 +1529,7 @@ function estimateCrossingTime(): number {
 }
 
 function getTimeMargin(): number {
-  return signalTimeRemaining - estimateCrossingTime();
+  return getPedestrianGreenRemaining() - estimateCrossingTime();
 }
 
 function getCrossingRecommendation(): CrossingRecommendation {
@@ -1504,7 +1615,7 @@ function updateJourneyPhase(): void {
   const enteredCrosswalk = crossesLine(previousPosition.z, camera.position.z, CROSSWALK_ENTRY_Z) && camera.position.z <= CROSSWALK_ENTRY_Z;
   if (enteredCrosswalk && crossingMetrics.crossingStartedAt === null) {
     crossingMetrics.crossingStartedAt = elapsedSeconds;
-    crossingMetrics.startSignalRemaining = signalTimeRemaining;
+    crossingMetrics.startSignalRemaining = getPedestrianGreenRemaining();
     crossingMetrics.startDelay = crossingMetrics.greenStartedAt === null ? null : Math.max(0, elapsedSeconds - crossingMetrics.greenStartedAt);
     const recommendation = getCrossingRecommendation();
     if (!isPedestrianGreen() || recommendation === 'WAIT') {
@@ -1626,9 +1737,21 @@ function buildAssistGuidance(): AssistGuidance {
         id: `signal-wait-${signalPhase}`,
         title: '보행 신호를 기다리고 있습니다.',
         facts: [`다음 상태까지 약 ${Math.ceil(signalTimeRemaining)}초`, `예상 횡단 시간 ${estimated.toFixed(1)}초`, `횡단 방향 ${direction}`],
-        recommendation: '대기선 뒤에서 다음 보행 신호를 기다리세요.',
-        priority: 'normal',
-        speak: `현재 보행 대기입니다. 약 ${Math.ceil(signalTimeRemaining)}초 뒤 신호가 바뀝니다.`,
+        recommendation: elderlyNeedsSignalExtension() ? '현재 보행 조건에서는 한 주기 안에 횡단하기 어렵습니다. 신호 연장 또는 보행 지원이 필요합니다.' : '대기선 뒤에서 다음 보행 신호를 기다리세요.',
+        priority: elderlyNeedsSignalExtension() ? 'caution' : 'normal',
+        speak: elderlyNeedsSignalExtension()
+          ? `현재 보행 조건에서는 한 주기 안에 횡단하기 어렵습니다. 신호 연장 또는 보행 지원이 필요합니다.`
+          : `현재 보행 대기입니다. 약 ${Math.ceil(signalTimeRemaining)}초 뒤 신호가 바뀝니다.`,
+      };
+    }
+    if (elderlyNeedsSignalExtension()) {
+      return {
+        id: `elderly-signal-extension-${Math.ceil(getPedestrianGreenRemaining() / 3)}`,
+        title: '현재 신호 시간만으로는 횡단이 어렵습니다.',
+        facts: [`남은 보행 시간 ${Math.ceil(getPedestrianGreenRemaining())}초`, `예상 횡단 ${estimated.toFixed(1)}초`, `횡단 방향 ${direction}`],
+        recommendation: '신호 연장 또는 보행 지원이 필요합니다. 체험에서는 신호 종료 후에도 차량이 안전 정지합니다.',
+        priority: 'urgent',
+        speak: `현재 신호 시간만으로는 횡단이 어렵습니다. 신호 연장 또는 보행 지원이 필요합니다.`,
       };
     }
     const recommendationText = recommendation === 'START_OK'
@@ -1639,10 +1762,10 @@ function buildAssistGuidance(): AssistGuidance {
     return {
       id: `cross-prep-${recommendation}-${Math.ceil(signalTimeRemaining / 3)}`,
       title: recommendation === 'WAIT' ? '현재 신호로는 시간이 부족합니다.' : '횡단 가능성을 계산했습니다.',
-      facts: [`보행 신호 ${Math.ceil(signalTimeRemaining)}초`, `예상 횡단 ${estimated.toFixed(1)}초`, `시간 여유 ${margin.toFixed(1)}초`, `방향 ${direction}`],
+      facts: [`보행 신호 ${Math.ceil(getPedestrianGreenRemaining())}초`, `예상 횡단 ${estimated.toFixed(1)}초`, `시간 여유 ${margin.toFixed(1)}초`, `방향 ${direction}`],
       recommendation: currentPersona.id === 'P-01' && isOutsideCrosswalkRamp(camera.position) ? '오른쪽 경사로 중심에 맞춘 뒤 다음 신호에 출발하세요.' : recommendationText,
       priority: recommendation === 'WAIT' ? 'caution' : recommendation === 'START_CAUTION' ? 'caution' : 'normal',
-      speak: `${recommendationText} 남은 시간 ${Math.ceil(signalTimeRemaining)}초, 예상 횡단 시간 ${Math.ceil(estimated)}초입니다.`,
+      speak: `${recommendationText} 남은 시간 ${Math.ceil(getPedestrianGreenRemaining())}초, 예상 횡단 시간 ${Math.ceil(estimated)}초입니다.`,
     };
   }
 
@@ -1653,7 +1776,7 @@ function buildAssistGuidance(): AssistGuidance {
     return {
       id: `crossing-${urgent ? 'urgent' : 'normal'}-${Math.ceil(remaining / 3)}`,
       title: urgent ? '신호 종료가 임박했습니다.' : '횡단 중입니다.',
-      facts: [`남은 거리 ${remaining.toFixed(1)}m`, `신호 ${Math.ceil(signalTimeRemaining)}초`, `진행 방향 ${direction}`],
+      facts: [`남은 거리 ${remaining.toFixed(1)}m`, `신호 ${Math.ceil(getPedestrianGreenRemaining())}초`, `진행 방향 ${direction}`],
       recommendation: urgent ? '방향을 유지하고 가장 가까운 반대편 안전 지점으로 이동하세요.' : '현재 방향을 유지해 반대편 경사로로 이동하세요.',
       priority: urgent ? 'urgent' : 'normal',
       speak: `${urgent ? '신호 종료가 임박했습니다.' : '횡단 중입니다.'} 남은 거리 ${Math.ceil(remaining)}미터, ${direction} 방향입니다.`,
@@ -1784,7 +1907,7 @@ function updateExperienceState(delta: number, speed: number): void {
   let pressureTarget = 0;
   if (journeyPhase === 'CROSS_PREP' || journeyPhase === 'CROSSING') {
     if (isFlashWarning()) pressureTarget = 82;
-    else if (isPedestrianGreen()) pressureTarget = THREE.MathUtils.clamp((1 - signalTimeRemaining / 24) * 65, 8, 65);
+    else if (isPedestrianGreen()) pressureTarget = THREE.MathUtils.clamp((1 - getPedestrianGreenRemaining() / PEDESTRIAN_GREEN_DURATION) * 72, 8, 72);
   }
   experienceState.timePressure = THREE.MathUtils.damp(experienceState.timePressure, pressureTarget, 2.3, delta);
 
@@ -1816,14 +1939,18 @@ function handleMovement(delta: number): number {
   const now = performance.now();
   if (hasMovementInput && !hadMovementInput) inputReadyAt = now + currentPersona.reactionDelay * 1000;
   hadMovementInput = hasMovementInput;
-  const inputEnabled = !hasMovementInput || now >= inputReadyAt;
+  const crossingReactionBlocked = journeyPhase === 'CROSS_PREP'
+    && isPedestrianGreen()
+    && crossingMetrics.greenStartedAt !== null
+    && elapsedSeconds < crossingMetrics.greenStartedAt + currentPersona.crossingReactionDelay;
+  const inputEnabled = (!hasMovementInput || now >= inputReadyAt) && !(crossingReactionBlocked && forward);
 
   const effects = getEnvironmentEffects(camera.position);
   if (effects.rough) roughZoneSeconds += delta;
   const acceleration = currentPersona.id === 'P-02' ? 7.5 : 12;
   const friction = 10;
   const fatiguePenalty = experienceEffectsEnabled ? THREE.MathUtils.lerp(1, 0.72, experienceState.fatigue / 100) : 1;
-  const maxSpeed = BASE_MAX_SPEED * currentPersona.speedMultiplier * effects.speedMultiplier * fatiguePenalty;
+  const maxSpeed = BASE_MAX_SPEED * currentPersona.speedMultiplier * getCrosswalkSpeedMultiplier() * effects.speedMultiplier * fatiguePenalty;
   const desiredZ = inputEnabled ? (Number(backward) - Number(forward)) * maxSpeed : 0;
   const desiredX = inputEnabled ? (Number(right) - Number(left)) * maxSpeed * currentPersona.strafeMultiplier : 0;
   velocity.z = THREE.MathUtils.damp(velocity.z, desiredZ, forward || backward ? acceleration : friction, delta);
@@ -1947,7 +2074,7 @@ function updateAnalysisPanel(speed: number): void {
   analysisSensing.textContent = sensing;
   analysisDecision.textContent = decision;
   analysisAction.textContent = speed > 0.12 ? `이동 ${speed.toFixed(1)}m/s` : '정지·정보 확인';
-  analysisSignalState.textContent = `${signalPhase} · ${signalTimeRemaining.toFixed(1)}초`;
+  analysisSignalState.textContent = `${signalPhase} · ${getSignalObjectTimeRemaining().toFixed(1)}초`;
   analysisEstimatedTime.textContent = `${estimateCrossingTime().toFixed(1)}초`;
   analysisTimeMargin.textContent = `${getTimeMargin().toFixed(1)}초`;
   analysisInput.textContent = `위치 (${camera.position.x.toFixed(1)}, ${camera.position.z.toFixed(1)}) · 속도 ${getEffectiveSpeed().toFixed(1)}m/s · 신호 ${signalPhase}`;
