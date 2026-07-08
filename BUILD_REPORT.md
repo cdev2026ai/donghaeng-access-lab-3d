@@ -1,18 +1,6 @@
-# v0.9.6 빌드·검수 보고서
+# BUILD REPORT
 
-## 수정 요약
-
-- v0.9.5 덮어쓰기본에서 `src/main.ts` 누락 문제 확인
-- v0.9.6 덮어쓰기본에 `src/main.ts` 포함
-- 목적지 앞 점자블록·볼라드·입간판 재배치 코드 유지
-
-## 실행 결과
-
-- `npm ci` 완료
-- `npm run build` 완료
-- TypeScript 검사 통과
-- Vite 프로덕션 빌드 완료
-
-## 빌드 참고
-
-Vite에서 번들 크기 경고가 표시되었지만, 기존과 동일한 경고이며 빌드 실패는 아닙니다.
+- 기준 버전: v0.9.8
+- 변경 요약: 불법주차 차량 위치를 도로 건너편 기준 우측으로 이동하고, v0.9.7의 도로 방향(z축) 이동은 되돌림
+- 빌드 상태: success (`npm run build` 완료)
+- 주요 수정 파일: `src/main.ts`, `PARKED_CAR_ROUTE.md`, `V0.9.8_TEST_CHECKLIST.md`

@@ -301,7 +301,7 @@ const previousPosition = new THREE.Vector3();
 const startPosition = new THREE.Vector3(0, PERSONAS['P-00'].cameraHeight, 22);
 const DESTINATION_X = -5.8;
 const DESTINATION_Z = -26.0;
-const PARKED_CAR_ROUTE_X = 0.72;
+const PARKED_CAR_ROUTE_X = 3.62;
 const PARKED_CAR_ROUTE_Z = -12.35;
 const destination = new THREE.Vector3(DESTINATION_X, PERSONAS['P-00'].cameraHeight, DESTINATION_Z);
 const parkedCarRoutePoint = new THREE.Vector3(PARKED_CAR_ROUTE_X, PERSONAS['P-00'].cameraHeight, PARKED_CAR_ROUTE_Z);
@@ -885,7 +885,7 @@ function addTextSprite(text: string, position: THREE.Vector3, accent = '#0b2d5b'
 function createParkedCarRouteGuide(): void {
   const points = [
     new THREE.Vector3(CROSSWALK_CENTER_X, 0.16, CROSSWALK_EXIT_Z - 0.8),
-    new THREE.Vector3(2.2, 0.16, -8.6),
+    new THREE.Vector3(5.2, 0.16, -8.6),
     new THREE.Vector3(PARKED_CAR_ROUTE_X, 0.16, PARKED_CAR_ROUTE_Z),
     new THREE.Vector3(-1.6, 0.16, -18.1),
     new THREE.Vector3(-4.1, 0.16, -23.25),
@@ -1256,26 +1256,26 @@ function createParkedCarObstacle(): void {
   const group = new THREE.Group();
   group.name = id;
   scene.add(group);
-  const carX = -0.9;
+  const carX = 2.0;
   const carZ = -9.7;
   addBox('O-03-car-body', new THREE.Vector3(2.5, 0.85, 4.8), new THREE.Vector3(carX, 0.65, carZ), 0xd95757, { collider: true, parent: group, obstacleId: id, rotationY: -0.08 });
   addBox('O-03-car-cabin', new THREE.Vector3(2.1, 0.72, 2.35), new THREE.Vector3(carX, 1.35, carZ - 0.3), 0x88b9d4, { parent: group, opacity: 0.8, rotationY: -0.08 });
-  for (const [wx, wz] of [[-2.05, -8.25], [0.25, -8.25], [-2.05, -11.15], [0.25, -11.15]] as const) {
+  for (const [offsetX, offsetZ] of [[-1.15, 1.45], [1.15, 1.45], [-1.15, -1.45], [1.15, -1.45]] as const) {
     const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.28, 16), makeMaterial(0x202a33, 0.9));
     wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(wx, 0.36, wz);
+    wheel.position.set(carX + offsetX, 0.36, carZ + offsetZ);
     group.add(wheel);
   }
-  addBox('O-03-fence', new THREE.Vector3(0.3, 1.15, 6.0), new THREE.Vector3(1.25, 0.65, -9.8), 0xe0b84f, { collider: true, parent: group, obstacleId: id });
-  for (let z = -12.3; z <= -7.3; z += 1.25) addBox('O-03-fence-mark', new THREE.Vector3(0.34, 0.18, 0.52), new THREE.Vector3(1.25, 1.05, z), 0x26323d, { parent: group });
-  addBox('O-03-road-warning', new THREE.Vector3(3.0, 0.025, 5.2), new THREE.Vector3(-3.2, 0.11, -9.7), 0xe79863, { castShadow: false, parent: group, opacity: 0.62 });
-  addTextSprite('O-03  불법 주차 · 좁은 통로', new THREE.Vector3(0.0, 3.4, -9.7), '#a63f3f', 0.72);
-  speedZones.push({ obstacleId: id, minX: 0.18, maxX: 1.12, minZ: -12.6, maxZ: -7.0, speedMultiplier: 0.65 });
+  addBox('O-03-fence', new THREE.Vector3(0.3, 1.15, 6.0), new THREE.Vector3(4.15, 0.65, -9.8), 0xe0b84f, { collider: true, parent: group, obstacleId: id });
+  for (let z = -12.3; z <= -7.3; z += 1.25) addBox('O-03-fence-mark', new THREE.Vector3(0.34, 0.18, 0.52), new THREE.Vector3(4.15, 1.05, z), 0x26323d, { parent: group });
+  addBox('O-03-road-warning', new THREE.Vector3(3.0, 0.025, 5.2), new THREE.Vector3(-0.3, 0.11, -9.7), 0xe79863, { castShadow: false, parent: group, opacity: 0.62 });
+  addTextSprite('O-03  불법 주차 · 좁은 통로', new THREE.Vector3(2.9, 3.4, -9.7), '#a63f3f', 0.72);
+  speedZones.push({ obstacleId: id, minX: 3.08, maxX: 4.02, minZ: -12.6, maxZ: -7.0, speedMultiplier: 0.65 });
   registerObstacle({
     id,
     name: '불법 주차 차량·좁은 통로',
     shortName: '불법 주차 차량',
-    center: new THREE.Vector3(-0.2, 0, -9.7),
+    center: new THREE.Vector3(2.7, 0, -9.7),
     detectionRadius: 5.3,
     passZ: -12.7,
     group,
