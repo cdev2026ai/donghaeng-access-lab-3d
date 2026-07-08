@@ -885,10 +885,11 @@ function addTextSprite(text: string, position: THREE.Vector3, accent = '#0b2d5b'
 function createParkedCarRouteGuide(): void {
   const points = [
     new THREE.Vector3(CROSSWALK_CENTER_X, 0.16, CROSSWALK_EXIT_Z - 0.8),
-    new THREE.Vector3(2.1, 0.16, -8.2),
+    new THREE.Vector3(2.2, 0.16, -8.6),
     new THREE.Vector3(PARKED_CAR_ROUTE_X, 0.16, PARKED_CAR_ROUTE_Z),
-    new THREE.Vector3(-2.3, 0.16, -18.4),
-    new THREE.Vector3(DESTINATION_X, 0.16, DESTINATION_Z + 2.4),
+    new THREE.Vector3(-1.6, 0.16, -18.1),
+    new THREE.Vector3(-4.1, 0.16, -23.25),
+    new THREE.Vector3(DESTINATION_X, 0.16, DESTINATION_Z + 2.1),
   ];
 
   points.slice(0, -1).forEach((start, index) => {
@@ -905,7 +906,8 @@ function createParkedCarRouteGuide(): void {
   });
 
   addBox('O-03-route-focus', new THREE.Vector3(1.25, 0.035, 1.25), new THREE.Vector3(PARKED_CAR_ROUTE_X, 0.2, PARKED_CAR_ROUTE_Z), 0xffc857, { castShadow: false, opacity: 0.72 });
-  addTextSprite('권장 경로: 불법 주차 차량 옆 좁은 통로 통과', new THREE.Vector3(0.5, 3.4, -13.2), '#a05a00', 0.64);
+  addBox('destination-front-focus', new THREE.Vector3(1.2, 0.035, 1.2), new THREE.Vector3(-4.1, 0.2, -23.25), 0xffd36a, { castShadow: false, opacity: 0.62 });
+  addTextSprite('권장 경로: 불법 주차 구간 → 점자블록 → 볼라드 앞 통로 → 목적지', new THREE.Vector3(-1.7, 3.5, -17.2), '#a05a00', 0.64);
 }
 
 function createWorld(): void {
@@ -1288,35 +1290,61 @@ function createBrokenTactileObstacle(): void {
   group.name = id;
   scene.add(group);
   const tileMaterial = makeMaterial(0xe7bd2f, 0.9);
-  const addTile = (x: number, z: number, rotation = 0): void => {
+  const dotMaterial = makeMaterial(0xd09a1b);
+  const addTile = (x: number, z: number, rotation = 0, broken = false): void => {
     const tile = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.055, 0.62), tileMaterial.clone());
     tile.position.set(x, 0.21, z);
     tile.rotation.y = rotation;
     tile.receiveShadow = true;
+    if (broken) {
+      tile.rotation.z = 0.08;
+      (tile.material as THREE.MeshStandardMaterial).opacity = 0.72;
+      (tile.material as THREE.MeshStandardMaterial).transparent = true;
+      tile.position.y = 0.2;
+    }
     group.add(tile);
     for (const dx of [-0.12, 0.12]) {
-      const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.025, 10), makeMaterial(0xd09a1b));
-      dot.position.set(x + dx, 0.255, z);
+      const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.025, 10), dotMaterial.clone());
+      dot.position.set(x + dx, broken ? 0.245 : 0.255, z);
+      if (broken) dot.position.x += dx * 0.35;
       group.add(dot);
     }
   };
-  for (let z = -12.6; z >= -14.0; z -= 0.72) addTile(3.8, z);
-  for (let i = 0; i < 4; i += 1) addTile(3.8 + i * 0.25, -15.8 - i * 0.62, -0.34);
-  addBox('O-04-crack-a', new THREE.Vector3(1.0, 0.035, 0.13), new THREE.Vector3(3.5, 0.225, -14.75), 0x775f52, { rotationY: 0.5, parent: group });
-  addBox('O-04-crack-b', new THREE.Vector3(0.8, 0.035, 0.11), new THREE.Vector3(4.2, 0.225, -15.05), 0x775f52, { rotationY: -0.55, parent: group });
-  addBox('O-04-rough-zone', new THREE.Vector3(3.4, 0.025, 3.3), new THREE.Vector3(3.9, 0.195, -15.0), 0xd4c4a6, { castShadow: false, parent: group, opacity: 0.48 });
-  addTextSprite('O-04  파손 · 끊긴 점자블록', new THREE.Vector3(3.9, 2.6, -15.0), '#8b6810', 0.7);
-  speedZones.push({ obstacleId: id, minX: 2.15, maxX: 5.65, minZ: -16.8, maxZ: -13.2, speedMultiplier: 0.75 });
+
+  const intactTiles: Array<[number, number, number?]> = [
+    [4.12, -6.85], [4.1, -7.58], [4.0, -8.32], [3.76, -9.06, -0.06],
+    [3.42, -9.84, -0.18], [3.0, -10.6, -0.28], [2.45, -11.35, -0.34],
+    [1.7, -12.08, -0.38], [0.95, -12.82, -0.42], [0.2, -13.58, -0.46],
+  ];
+  intactTiles.forEach(([x, z, rotation = 0]) => addTile(x, z, rotation));
+
+  const brokenTiles: Array<[number, number, number?]> = [
+    [-0.45, -14.42, -0.5], [-1.05, -15.18, -0.55], [-1.65, -15.96, -0.62],
+  ];
+  brokenTiles.forEach(([x, z, rotation = 0]) => addTile(x, z, rotation, true));
+
+  const resumedTiles: Array<[number, number, number?]> = [
+    [-2.15, -16.84, -0.68], [-2.6, -17.72, -0.74], [-2.98, -18.6, -0.82],
+    [-3.28, -19.48, -0.88], [-3.52, -20.34, -0.92],
+  ];
+  resumedTiles.forEach(([x, z, rotation = 0]) => addTile(x, z, rotation));
+
+  addBox('O-04-guidance-zone', new THREE.Vector3(1.1, 0.025, 7.7), new THREE.Vector3(4.05, 0.195, -10.2), 0xe6d18e, { castShadow: false, parent: group, opacity: 0.28 });
+  addBox('O-04-gap-zone', new THREE.Vector3(3.8, 0.025, 6.9), new THREE.Vector3(-1.7, 0.195, -17.0), 0xd4c4a6, { castShadow: false, parent: group, opacity: 0.48 });
+  addBox('O-04-crack-a', new THREE.Vector3(1.15, 0.035, 0.13), new THREE.Vector3(-0.85, 0.225, -15.05), 0x775f52, { rotationY: 0.5, parent: group });
+  addBox('O-04-crack-b', new THREE.Vector3(0.95, 0.035, 0.11), new THREE.Vector3(-1.48, 0.225, -15.72), 0x775f52, { rotationY: -0.55, parent: group });
+  addTextSprite('O-04  신호등에서 이어지다 훼손된 점자블록', new THREE.Vector3(-0.9, 2.75, -15.7), '#8b6810', 0.7);
+  speedZones.push({ obstacleId: id, minX: -4.3, maxX: 4.8, minZ: -20.9, maxZ: -13.4, speedMultiplier: 0.75 });
   registerObstacle({
     id,
-    name: '파손·끊긴 점자블록',
+    name: '신호등에서 이어지다 파손된 점자블록',
     shortName: '파손 점자블록',
-    center: new THREE.Vector3(3.9, 0, -15.0),
-    detectionRadius: 4.0,
-    passZ: -17.0,
+    center: new THREE.Vector3(-1.2, 0, -16.7),
+    detectionRadius: 6.1,
+    passZ: -21.0,
     group,
-    environmentMessage: '점자 유도 정보가 끊기고 바닥이 고르지 않습니다.',
-    appMessage: '점자 유도선이 약 2m 끊겼습니다. 현재 방향을 유지하며 정상 유도선까지 천천히 이동하세요.',
+    environmentMessage: '신호등에서 목적지 방향으로 이어지던 점자 유도 정보가 일부 끊기고 훼손되어 있습니다.',
+    appMessage: '점자 유도선이 목적지 방향으로 이어지지만 중간 약 2m 구간이 파손되었습니다. 현재 방향을 유지하며 다음 점자 유도선까지 천천히 이동하세요.',
   });
 }
 
@@ -1325,34 +1353,34 @@ function createBollardSignObstacle(): void {
   const group = new THREE.Group();
   group.name = id;
   scene.add(group);
-  const bollardPositions = [3.35, 4.55, 7.15];
+  const bollardPositions = [-5.35, -4.15, -2.95];
   bollardPositions.forEach((x, index) => {
-    const bollard = addCylinder(`O-05-bollard-${index}`, 0.22, 1.1, new THREE.Vector3(x, 0.65, -19.4), 0x667680, 18, group);
+    const bollard = addCylinder(`O-05-bollard-${index}`, 0.22, 1.1, new THREE.Vector3(x, 0.65, -23.25), 0x667680, 18, group);
     bollard.updateMatrixWorld(true);
     addCollider(new THREE.Box3().setFromObject(bollard), bollard.name, id);
-    addBox(`O-05-band-${index}`, new THREE.Vector3(0.48, 0.13, 0.48), new THREE.Vector3(x, 0.85, -19.4), 0xf0d359, { parent: group });
+    addBox(`O-05-band-${index}`, new THREE.Vector3(0.48, 0.13, 0.48), new THREE.Vector3(x, 0.85, -23.25), 0xf0d359, { parent: group });
   });
   const signGroup = new THREE.Group();
-  signGroup.position.set(5.85, 0, -19.0);
-  signGroup.rotation.y = -0.42;
+  signGroup.position.set(-1.75, 0, -22.7);
+  signGroup.rotation.y = 0.22;
   group.add(signGroup);
   addBox('O-05-sign-panel', new THREE.Vector3(1.3, 1.2, 0.12), new THREE.Vector3(0, 1.45, 0), 0xf08a52, { parent: signGroup });
   addBox('O-05-sign-leg-left', new THREE.Vector3(0.13, 1.1, 0.13), new THREE.Vector3(-0.42, 0.55, 0), 0x5a5f66, { parent: signGroup });
   addBox('O-05-sign-leg-right', new THREE.Vector3(0.13, 1.1, 0.13), new THREE.Vector3(0.42, 0.55, 0), 0x5a5f66, { parent: signGroup });
   signGroup.updateMatrixWorld(true);
   addCollider(new THREE.Box3().setFromObject(signGroup), 'O-05-sign', id);
-  addTextSprite('O-05  볼라드 · 입간판', new THREE.Vector3(5.0, 3.2, -19.4), '#9b512b', 0.68);
-  speedZones.push({ obstacleId: id, minX: 2.8, maxX: 6.7, minZ: -21.0, maxZ: -17.8, speedMultiplier: 0.8 });
+  addTextSprite('O-05  목적지 앞 볼라드 · 입간판', new THREE.Vector3(-4.0, 3.2, -23.2), '#9b512b', 0.68);
+  speedZones.push({ obstacleId: id, minX: -6.0, maxX: -1.6, minZ: -24.8, maxZ: -21.8, speedMultiplier: 0.8 });
   registerObstacle({
     id,
-    name: '볼라드·입간판',
+    name: '목적지 앞 볼라드·입간판',
     shortName: '볼라드·입간판',
-    center: new THREE.Vector3(4.9, 0, -19.4),
-    detectionRadius: 4.1,
-    passZ: -21.0,
+    center: new THREE.Vector3(-4.0, 0, -23.25),
+    detectionRadius: 4.3,
+    passZ: -24.9,
     group,
-    environmentMessage: '볼라드와 입간판 때문에 통로 폭과 진입 각도가 제한됩니다.',
-    appMessage: '전방 통로가 좁아집니다. 볼라드 사이 중앙으로 천천히 진입하세요.',
+    environmentMessage: '버스정류장 앞 볼라드와 입간판 때문에 통로 폭과 진입 각도가 제한됩니다.',
+    appMessage: '목적지 앞 통로가 볼라드와 입간판으로 좁아집니다. 볼라드 사이 중앙을 확인하며 천천히 진입하세요.',
   });
 }
 
