@@ -15,7 +15,7 @@ type ModalId =
 type PersonaId = 'P-00' | 'P-01' | 'P-02' | 'P-03';
 type AssistMode = 'off' | 'on';
 type ObstacleId = 'O-01' | 'O-02' | 'O-03' | 'O-04' | 'O-05';
-type EffectStrength = 'off' | 'low' | 'medium' | 'high';
+type EffectStrength = 'off' | 'low' | 'medium' | 'high' | 'veryHigh';
 type JourneyPhase = 'READY' | 'SIDEWALK_ENTRY' | 'WAIT_SIGNAL' | 'CROSS_PREP' | 'CROSSING' | 'POST_CROSS' | 'ARRIVED';
 type PedestrianSignalPhase = 'INIT_SAFE' | 'RED_WAIT' | 'GREEN_START' | 'GREEN_ACTIVE' | 'FLASH_WARNING' | 'ALL_STOP';
 type CrossingRecommendation = 'WAIT' | 'START_OK' | 'START_CAUTION' | 'EMERGENCY';
@@ -157,8 +157,15 @@ const SIGNAL_DURATIONS: Record<PedestrianSignalPhase, number> = {
   ALL_STOP: 2,
 };
 const PEDESTRIAN_GREEN_DURATION = SIGNAL_DURATIONS.GREEN_START + SIGNAL_DURATIONS.GREEN_ACTIVE + SIGNAL_DURATIONS.FLASH_WARNING;
-const VISION_STRENGTH_MULTIPLIER: Record<EffectStrength, number> = { off: 0, low: 0.56, medium: 0.78, high: 0.93 };
-const VISION_BASE_MASK: Record<EffectStrength, number> = { off: 0, low: 0.25, medium: 0.43, high: 0.58 };
+const VISION_STRENGTH_MULTIPLIER: Record<EffectStrength, number> = { off: 0, low: 0.78, medium: 0.96, high: 1.16, veryHigh: 1.34 };
+const VISION_BASE_MASK: Record<EffectStrength, number> = { off: 0, low: 0.48, medium: 0.64, high: 0.78, veryHigh: 0.9 };
+const VISION_VISUAL_PRESET: Record<EffectStrength, { opacity: number; blur: number; center: number; mid: number; haze: number; sceneBlur: number; saturation: number; brightness: number }> = {
+  off: { opacity: 0, blur: 0, center: 100, mid: 100, haze: 0, sceneBlur: 0, saturation: 1, brightness: 1 },
+  low: { opacity: 0.86, blur: 1.2, center: 20, mid: 38, haze: 0.16, sceneBlur: 0.45, saturation: 0.58, brightness: 0.88 },
+  medium: { opacity: 0.94, blur: 2.0, center: 15, mid: 29, haze: 0.25, sceneBlur: 0.9, saturation: 0.44, brightness: 0.80 },
+  high: { opacity: 0.98, blur: 2.8, center: 10, mid: 22, haze: 0.34, sceneBlur: 1.35, saturation: 0.34, brightness: 0.72 },
+  veryHigh: { opacity: 1, blur: 3.5, center: 7, mid: 17, haze: 0.43, sceneBlur: 1.8, saturation: 0.26, brightness: 0.64 },
+};
 
 const PERSONAS: Record<PersonaId, PersonaDefinition> = {
   'P-00': {
@@ -317,7 +324,7 @@ let lastCollisionLabel = '';
 let guideEnabled = true;
 let motionEnabled = true;
 let experienceEffectsEnabled = true;
-let visionEffectStrength: EffectStrength = 'medium';
+let visionEffectStrength: EffectStrength = 'high';
 let highContrastEnabled = false;
 let caneVisibleEnabled = true;
 let audibleSignalEnabled = false;
@@ -603,7 +610,7 @@ function getInitialExperienceState(personaId: PersonaId): ExperienceState {
     'P-00': { fatigue: 0, anxiety: 3, directionConfidence: 96, visionClarity: 100 },
     'P-01': { fatigue: 5, anxiety: 8, directionConfidence: 90, visionClarity: 100 },
     'P-02': { fatigue: 10, anxiety: 10, directionConfidence: 88, visionClarity: 96 },
-    'P-03': { fatigue: 4, anxiety: 12, directionConfidence: 62, visionClarity: 50 },
+    'P-03': { fatigue: 4, anxiety: 12, directionConfidence: 54, visionClarity: 28 },
   };
   const selected = values[personaId];
   return {
@@ -664,17 +671,33 @@ function updateExperienceUI(): void {
   if (experienceState.fatigue >= 30) effects.push('이동 감속');
   if (experienceState.anxiety >= 35) effects.push('불안 누적');
   if (experienceState.timePressure >= 35) effects.push('시간 압박');
-  if (currentPersona.id === 'P-03') effects.push('주변부 시야 제한');
+  if (currentPersona.id === 'P-01' && getEnvironmentEffects(camera.position).rough) effects.push('요철 진동');
+  if (currentPersona.id === 'P-03') effects.push(`주변부 시야 제한(${visionEffectStrength === 'veryHigh' ? '매우 강함' : visionEffectStrength === 'high' ? '강함' : visionEffectStrength === 'medium' ? '중간' : visionEffectStrength === 'low' ? '낮음' : '끔'})`);
   if (currentPersona.id === 'P-03' && experienceState.directionConfidence < 55) effects.push('방향 정보 부족');
   activeEffectList.innerHTML = effects.length ? effects.map((effect) => `<span>${effect}</span>`).join('') : '<span>적용 효과 없음</span>';
 
-  const visionMultiplier = currentPersona.id === 'P-03' && experienceEffectsEnabled ? VISION_STRENGTH_MULTIPLIER[visionEffectStrength] : 0;
-  const mask = currentPersona.id === 'P-03' && experienceEffectsEnabled ? VISION_BASE_MASK[visionEffectStrength] : 0;
+  const visualFieldActive = currentPersona.id === 'P-03' && experienceEffectsEnabled && visionEffectStrength !== 'off';
+  const preset = VISION_VISUAL_PRESET[visualFieldActive ? visionEffectStrength : 'off'];
+  const visionMultiplier = visualFieldActive ? VISION_STRENGTH_MULTIPLIER[visionEffectStrength] : 0;
+  const mask = visualFieldActive ? VISION_BASE_MASK[visionEffectStrength] : 0;
   const clarityBurden = ((100 - experienceState.visionClarity) / 100) * visionMultiplier;
-  experienceVisualLayer.style.setProperty('--vision-mask', mask.toFixed(2));
-  experienceVisualLayer.style.setProperty('--vision-burden', clarityBurden.toFixed(2));
-  experienceVisualLayer.style.setProperty('--fatigue-burden', (experienceState.fatigue / 100).toFixed(2));
-  experienceVisualLayer.style.setProperty('--anxiety-burden', (experienceState.anxiety / 100).toFixed(2));
+  const obstacleBoost = currentObstacleId === 'O-04' ? 1.16 : currentObstacleId === 'O-03' || currentObstacleId === 'O-05' ? 1.08 : 1;
+  const finalOpacity = THREE.MathUtils.clamp((preset.opacity + mask * 0.12 + clarityBurden * 0.1) * obstacleBoost, 0, 1);
+  const centerRadius = Math.max(5, preset.center - clarityBurden * 7 - (currentObstacleId === 'O-04' ? 2.5 : 0));
+  const midRadius = Math.max(centerRadius + 8, preset.mid - clarityBurden * 8 - (currentObstacleId === 'O-04' ? 3 : 0));
+  const sceneBlur = lowSpecEnabled ? Math.min(preset.sceneBlur * 0.45, 0.8) : preset.sceneBlur;
+
+  experienceVisualLayer.style.setProperty('--vision-opacity', finalOpacity.toFixed(2));
+  experienceVisualLayer.style.setProperty('--vision-blur', `${preset.blur.toFixed(1)}px`);
+  experienceVisualLayer.style.setProperty('--vision-center-radius', `${centerRadius.toFixed(1)}%`);
+  experienceVisualLayer.style.setProperty('--vision-mid-radius', `${midRadius.toFixed(1)}%`);
+  experienceVisualLayer.style.setProperty('--vision-haze-opacity', (preset.haze + clarityBurden * 0.2).toFixed(2));
+  experienceVisualLayer.style.setProperty('--fatigue-opacity', (experienceState.fatigue / 150).toFixed(2));
+  experienceVisualLayer.style.setProperty('--anxiety-opacity', (experienceState.anxiety / 140).toFixed(2));
+  document.body.style.setProperty('--scene-vision-blur', `${sceneBlur.toFixed(1)}px`);
+  document.body.style.setProperty('--scene-vision-saturation', String(preset.saturation));
+  document.body.style.setProperty('--scene-vision-brightness', String(preset.brightness));
+  document.body.classList.toggle('vision-effect-active', visualFieldActive);
   document.body.classList.toggle('experience-effects-off', !experienceEffectsEnabled);
 }
 
@@ -748,7 +771,7 @@ function restoreDefaultSettings(): void {
   guideToggle.checked = true;
   motionToggle.checked = true;
   experienceEffectsToggle.checked = true;
-  visionStrengthSelect.value = 'medium';
+  visionStrengthSelect.value = 'high';
   contrastToggle.checked = false;
   caneVisibleToggle.checked = true;
   audibleSignalToggle.checked = false;
@@ -1382,9 +1405,12 @@ function setPlayerHeight(time: number): void {
   const rampHeight = getRampHeight(camera.position.x, camera.position.z);
   let y = currentPersona.cameraHeight + rampHeight;
   const rough = getEnvironmentEffects(camera.position).rough;
-  if (rough && motionEnabled && experienceEffectsEnabled) y += Math.sin(time * 21) * 0.018;
+  if (rough && motionEnabled && experienceEffectsEnabled) {
+    const roughAmplitude = currentPersona.id === 'P-01' ? 0.062 : currentPersona.id === 'P-02' ? 0.032 : 0.024;
+    y += Math.sin(time * 27) * roughAmplitude + Math.sin(time * 49) * roughAmplitude * 0.35;
+  }
   if (experienceEffectsEnabled && experienceState.anxiety > 60) y += Math.sin(time * 8.2) * 0.006 * (experienceState.anxiety / 100);
-  camera.position.y = THREE.MathUtils.lerp(camera.position.y, y, 0.34);
+  camera.position.y = THREE.MathUtils.lerp(camera.position.y, y, rough && currentPersona.id === 'P-01' ? 0.55 : 0.34);
 }
 
 function getPedestrianGreenRemaining(): number {
@@ -1455,6 +1481,12 @@ function updateSignal(delta: number): void {
   }
 }
 
+function getPersonaAudioVolume(): number {
+  if (currentPersona.id === 'P-02') return 0.48;
+  if (currentPersona.id === 'P-03') return 1.0;
+  return 0.82;
+}
+
 function playSignalTone(urgent: boolean): void {
   try {
     const audioContext = new AudioContext();
@@ -1463,7 +1495,7 @@ function playSignalTone(urgent: boolean): void {
     oscillator.type = 'sine';
     oscillator.frequency.value = urgent ? 880 : 660;
     gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, audioContext.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.08 * getPersonaAudioVolume(), audioContext.currentTime + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.16);
     oscillator.connect(gain).connect(audioContext.destination);
     oscillator.start();
@@ -1838,8 +1870,9 @@ function speakGuidance(guidance: AssistGuidance, automatic = false): void {
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(guidance.speak);
   utterance.lang = 'ko-KR';
-  utterance.rate = 1.02;
-  utterance.pitch = 1;
+  utterance.rate = currentPersona.id === 'P-02' ? 0.94 : 1.02;
+  utterance.pitch = currentPersona.id === 'P-02' ? 0.94 : 1;
+  utterance.volume = getPersonaAudioVolume();
   window.speechSynthesis.speak(utterance);
   lastSpokenGuidanceId = guidance.id;
 }
